@@ -1,6 +1,6 @@
 # Parts Manager PLM workbench for FreeCAD
 
-This workbench contains tools to interact with Part Manager Plm app you can find under the https://github.com/
+This workbench contains tools to interact with Part Manager Plm app you can find under the https://github.com/redshift2/Parts_Manager_PLM
 
 ## Installation
 
