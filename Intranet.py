@@ -29,24 +29,22 @@ else:
         return txt
     # \endcond
 
-__title__ = "FreeCAD Taack PLM commands"
-__author__ = "Adrien Guichard"
-__url__ = "http://taack.org"
+__title__ = "Parts Manager PLM commands"
 
 
 class CommandTaackPlm:
     def __init__(self):
         self.taackIntranetSession = requests.session()
-        self.settings = QtCore.QSettings("Taack", "TaackPLM")
+        self.settings = QtCore.QSettings("PMPLM", "PartsManger")
         self.connected = False
         self.user = self.settings.value("username", "Login")
         self.url = self.settings.value("url", "Server URL")
         self.passwd = ""
 
     def GetResources(self):
-        return {'Pixmap': os.path.join(os.path.dirname(__file__), "icons", 'logo_taack.svg'),
-                'MenuText': QtCore.QT_TRANSLATE_NOOP("TaackPlm_Intranet", "Plm"),
-                'ToolTip': QtCore.QT_TRANSLATE_NOOP("TaackPlm_Intranet", "Manages the current document with Taack PLM")}
+        return {'Pixmap': os.path.join(os.path.dirname(__file__), "icons", 'icon.png'),
+                'MenuText': QtCore.QT_TRANSLATE_NOOP("PMPlm_Intranet", "Plm"),
+                'ToolTip': QtCore.QT_TRANSLATE_NOOP("PMPlm_Intranet", "Parts Management done right")}
 
     def IsActive(self):
         """Here you can define if the command must be active or not (greyed) if certain conditions

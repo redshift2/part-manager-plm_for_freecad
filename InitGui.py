@@ -5,9 +5,9 @@ class TaackPLMWorkbench (Workbench):
     "TaackPLM workbench object"
 
     def __init__(self):
-        self.__class__.Icon = FreeCAD.getUserAppDataDir() + "Mod/taack-plm-freecad/icons/taackPLM.xpm"
-        self.__class__.MenuText = "TaackPLM"
-        self.__class__.ToolTip = "TaackPLM workbench"
+        self.__class__.Icon = FreeCAD.getUserAppDataDir() + "Mod/part-manager-plm_for_freecad/icons/icon.png"
+        self.__class__.MenuText = "Parts PLM"
+        self.__class__.ToolTip = "Parts Manager Workbench"
 
     def Initialize(self):
         import Intranet
