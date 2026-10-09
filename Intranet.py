@@ -32,9 +32,9 @@ else:
 __title__ = "Parts Manager PLM commands"
 
 
-class CommandTaackPlm:
+class CommandPMPlm:
     def __init__(self):
-        self.taackIntranetSession = requests.session()
+        self.plmIntranetSession = requests.session()
         self.settings = QtCore.QSettings("PMPLM", "PartsManger")
         self.connected = False
         self.user = self.settings.value("username", "Login")
@@ -912,8 +912,8 @@ class TaackPlmTaskPanel(object):
             print("Request:")
             print(request_data)
             print("AUTHENTICATION COOKIES:")
-            print(self.po.taackIntranetSession.cookies)
-            response = self.po.taackIntranetSession.post(
+            print(self.po.plmIntranetSession.cookies)
+            response = self.po.plmIntranetSession.post(
                 url,
                 json=request_data,
                 timeout=10
@@ -1330,7 +1330,7 @@ class TaackPlmTaskPanel(object):
             # ---------------------------------------------------------
             # Download the ZIP
             # ---------------------------------------------------------
-            response = self.po.taackIntranetSession.get(
+            response = self.po.plmIntranetSession.get(
                 url,
                 params={"id": part_id},
                 timeout=120
@@ -1595,7 +1595,7 @@ class TaackPlmTaskPanel(object):
 
             url = base_url + "plmJson/searchParts"
 
-            response = self.po.taackIntranetSession.get(
+            response = self.po.plmIntranetSession.get(
                 url,
                 params={"originalName": search_text},
                 timeout=30
@@ -1710,7 +1710,7 @@ class TaackPlmTaskPanel(object):
             base_url = self.po.url.rstrip("/") + "/"
             url = base_url + "plmJson/partsByTag"
 
-            response = self.po.taackIntranetSession.get(
+            response = self.po.plmIntranetSession.get(
                 url,
                 params={"tagId": tag_id},
                 timeout=10
@@ -1805,7 +1805,7 @@ class TaackPlmTaskPanel(object):
 
             print("Loading PLM tags from: " + url)
 
-            response = self.po.taackIntranetSession.get(
+            response = self.po.plmIntranetSession.get(
                 url=url,
                 timeout=10
             )
@@ -1961,7 +1961,7 @@ class TaackPlmTaskPanel(object):
 
     def logout_intranet(self):
         print('logout Intranet ...')
-        self.po.taackIntranetSession.get(url=self.form.urlEdit.text() + 'logout', timeout=5)
+        self.po.plmIntranetSession.get(url=self.form.urlEdit.text() + 'logout', timeout=5)
         self.form.connectButton.setStyleSheet('QPushButton {color: black;}')
         self.form.connectButton.setEnabled(True)
         self.form.connectButton.setText('Connect')
@@ -1971,7 +1971,7 @@ class TaackPlmTaskPanel(object):
         data = {"username": self.form.userEdit.text(), "password": self.form.passEdit.text(), "ajax": 'true'}
         self.save_preferences()
         try:
-            r = self.po.taackIntranetSession.post(url=self.form.urlEdit.text() + 'login/authenticate', data=data,timeout=5)
+            r = self.po.plmIntranetSession.post(url=self.form.urlEdit.text() + 'login/authenticate', data=data,timeout=5)
             if r.json()["success"] == True:
                 self.po.connected = True
                 self.get_server_info()
@@ -2034,7 +2034,7 @@ class TaackPlmTaskPanel(object):
         data = {"ajax": 'true'}
         file_tmp_zip_proto = open(tmp_zip_proto, 'rb')
         try:
-            r = self.po.taackIntranetSession.post(url=self.po.url + 'plmProto/uploadProto', files={'proto.bin': file_tmp_zip_proto}, data=data)
+            r = self.po.plmIntranetSession.post(url=self.po.url + 'plmProto/uploadProto', files={'proto.bin': file_tmp_zip_proto}, data=data)
             resp_bytes = BytesIO(r.content).read()
             resp_bucket = PlmBuf.Bucket()
             resp_bucket.ParseFromString(resp_bytes)
@@ -2066,7 +2066,7 @@ class TaackPlmTaskPanel(object):
 
                         file_tmp_zip_files = open(tmp_zip_files, 'rb')
                         try:
-                            r = self.po.taackIntranetSession.post(url=self.po.url + 'plmProto/uploadZip', files={'proto.bin': file_tmp_zip_files}, data=data)
+                            r = self.po.plmIntranetSession.post(url=self.po.url + 'plmProto/uploadZip', files={'proto.bin': file_tmp_zip_files}, data=data)
                             resp_bytes = BytesIO(r.content).read()
                             resp_bucket = PlmBuf.Bucket()
                             resp_bucket.ParseFromString(resp_bytes)
@@ -2080,7 +2080,7 @@ class TaackPlmTaskPanel(object):
                         finally:
                             file_tmp_zip_files.close()
                             os.remove(tmp_zip_files)
-                r = self.po.taackIntranetSession.post(url=self.po.url + 'plmProto/reset', data=data)
+                r = self.po.plmIntranetSession.post(url=self.po.url + 'plmProto/reset', data=data)
                 self.form.uploadProgress.setValue(100)
                 self.form.uploadButton.setEnabled(True)
                 self.form.uploadButton.setText("Upload")
@@ -2537,7 +2537,7 @@ class TaackPlmTaskPanel(object):
         try:
             url = self.po.url + 'plmJson/serverInfo'
 
-            response = self.po.taackIntranetSession.get(url, timeout=10)
+            response = self.po.plmIntranetSession.get(url, timeout=10)
             response.raise_for_status()
 
             server_info = response.json()
@@ -2570,4 +2570,4 @@ class TaackPlmTaskPanel(object):
             self.form.maximumFileUploadSizeValue.setText("Unknown")
 
 if FreeCAD.GuiUp:
-    FreeCADGui.addCommand('TaackPLM_Intranet', CommandTaackPlm())
+    FreeCADGui.addCommand('PMPLM_Intranet', CommandPMPlm())
