@@ -17,7 +17,12 @@ from PySide import QtCore, QtWidgets
 import Login
 import PlmDownload
 
-
+ICON_DIR = os.path.join(
+    FreeCAD.getUserAppDataDir(),
+    "Mod",
+    "part-manager-plm_for_freecad",
+    "icons"
+)
 # ============================================================
 # Search Parts Panel
 # ============================================================
@@ -935,11 +940,15 @@ def show_search_parts():
 
 class CommandPMPLMSearchParts:
 
-    def GetResources(self):
 
+    def GetResources(self):
         return {
-            "MenuText": "Search Parts",
-            "ToolTip": "Search PLM parts by name",
+            "Pixmap": os.path.join(
+                ICON_DIR,
+                "download.svg"
+            ),
+            "MenuText": "Search for parts",
+            "ToolTip": "Search for parts PLM server"
         }
 
     def IsActive(self):

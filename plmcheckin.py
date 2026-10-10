@@ -15,6 +15,13 @@ import Login as login
 import plmupload
 
 
+ICON_DIR = os.path.join(
+    FreeCAD.getUserAppDataDir(),
+    "Mod",
+    "part-manager-plm_for_freecad",
+    "icons"
+)
+
 def _enum(owner, old_name, new_path):
     value = getattr(owner, old_name, None)
     if value is not None:
@@ -760,11 +767,15 @@ def show_checkin_dialog():
 class PMPLM_CheckIn:
     """Open the PLM Check-In dialog."""
 
+
     def GetResources(self):
         return {
-            "Pixmap": "",
-            "MenuText": "PLM Check-In",
-            "ToolTip": "Check FreeCAD documents into the PLM server",
+            "Pixmap": os.path.join(
+                ICON_DIR,
+                "upload.svg"
+            ),
+            "MenuText": "Check In Parts",
+            "ToolTip": "Check in parts to the PLM server"
         }
 
     def Activated(self):

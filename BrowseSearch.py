@@ -16,6 +16,12 @@ from PySide import QtCore, QtWidgets
 import Login
 import PlmDownload
 
+ICON_DIR = os.path.join(
+    FreeCAD.getUserAppDataDir(),
+    "Mod",
+    "part-manager-plm_for_freecad",
+    "icons"
+)
 
 class BrowseByTagPanel:
 
@@ -774,10 +780,13 @@ class CommandPMPLMBrowseByTag:
 
     def GetResources(self):
         return {
-            "MenuText": "Browse by Tag",
-            "ToolTip": "Browse PLM tags and their associated parts",
+            "Pixmap": os.path.join(
+                ICON_DIR,
+                "catalog.svg"
+            ),
+            "MenuText": "Browse Catalog",
+            "ToolTip": "Browse the parts catalog on the PLM server"
         }
-
     def IsActive(self):
         return True
 

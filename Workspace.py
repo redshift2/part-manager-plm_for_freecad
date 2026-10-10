@@ -22,6 +22,13 @@ from PySide import QtCore, QtWidgets
 import Login
 
 
+ICON_DIR = os.path.join(
+    FreeCAD.getUserAppDataDir(),
+    "Mod",
+    "part-manager-plm_for_freecad",
+    "icons"
+)
+
 WORKSPACE_INVENTORY_ENDPOINT = "/plmJson/workspaceParts"
 
 
@@ -793,11 +800,13 @@ class CommandPMPLMWorkspace:
 
     def GetResources(self):
         return {
+            "Pixmap": os.path.join(
+                ICON_DIR,
+                "workspace.svg"
+            ),
             "MenuText": "Workspace",
-            "ToolTip": "Manage PLM workspaces and local parts",
-            "Pixmap": ""
+            "ToolTip": "Workspace Manager Parts Manager PLM server"
         }
-
     def IsActive(self):
         return True
 

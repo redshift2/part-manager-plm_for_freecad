@@ -6,7 +6,12 @@ import FreeCADGui
 
 from PySide import QtCore, QtWidgets
 
-
+ICON_DIR = os.path.join(
+    FreeCAD.getUserAppDataDir(),
+    "Mod",
+    "part-manager-plm_for_freecad",
+    "icons"
+)
 # ------------------------------------------------------------
 # Shared PLM connection
 # ------------------------------------------------------------
@@ -297,9 +302,22 @@ class CommandPMPLMLogin:
 
     def GetResources(self):
         return {
+            "Pixmap": os.path.join(
+                ICON_DIR,
+                "login.svg"
+            ),
             "MenuText": "Login",
-            "ToolTip": "Connect to the Parts Manager PLM server",
+            "ToolTip": "Connect to the Parts Manager PLM server"
         }
+
+    def IsActive(self):
+        return True
+
+    def Activated(self):
+        # Keep your existing login dialog implementation here.
+        pass
+
+
 
     def IsActive(self):
         return True

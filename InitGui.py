@@ -1,20 +1,24 @@
 # FreeCAD init script of the Parts Manager PLM module
 
 import os
+import sys
+
 import FreeCAD
 import FreeCADGui as Gui
+
 
 def set_default_workspace_directory():
     """Set FreeCAD's default directory to the saved PLM workspace."""
 
     from PySide import QtCore
-    import os
 
     settings = QtCore.QSettings()
-    settings.beginGroup("PartsManagerPLM")
+    settings.beginGroup("Taack")
+    settings.beginGroup("TaackPLM")
 
     workspace = settings.value("workspace", "")
 
+    settings.endGroup()
     settings.endGroup()
 
     if not workspace:
@@ -44,40 +48,42 @@ def set_default_workspace_directory():
         "PLM default directory set to: {}\n".format(workspace)
     )
 
-class PMPLMWorkbench(Workbench):
 
-    "Parts Manager PLM workbench"
+class PMPLMWorkbench(Workbench):
+    """Parts Manager PLM workbench."""
 
     def __init__(self):
-        self.__class__.Icon = (
-            FreeCAD.getUserAppDataDir()
-            + "Mod/part-manager-plm_for_freecad/icons/icon.png"
-        )
-        self.__class__.MenuText = "Parts Manager PLM"
-        self.__class__.ToolTip = "Parts Manager Workbench"
 
-    def Initialize(self):
-        # Ensure FreeCAD can locate the workbench modules.
-        module_dir = os.path.join(
+        self.module_dir = os.path.join(
             FreeCAD.getUserAppDataDir(),
             "Mod",
             "part-manager-plm_for_freecad"
         )
 
-        if module_dir not in sys.path:
-            sys.path.insert(0, module_dir)
+        self.icon_dir = os.path.join(self.module_dir, "icons")
 
-        # Import existing modules.
+        self.__class__.Icon = os.path.join(self.icon_dir, "icon.png")
+
+        self.__class__.MenuText = "Parts Manager PLM"
+        self.__class__.ToolTip = ("Parts Manager PLM Workbench")
+
+    def Initialize(self):
+
+        # Make the module directory available to Python.
+        if self.module_dir not in sys.path:
+            sys.path.insert(0, self.module_dir)
+
+        # Import the command modules.
         import Login
         import BrowseSearch
         import Workspace
         import SearchParts
         import plmcheckin
 
-        # Explicitly register the Check-In command.
+        # Register the Check-In command.
         plmcheckin.register_command()
 
-        # Existing toolbar and menu commands.
+        # Toolbar and menu commands.
         self.commands = [
             "PMPLM_Login",
             "PMPLM_BrowseByTag",
@@ -86,18 +92,25 @@ class PMPLMWorkbench(Workbench):
             "PMPLM_CheckIn",
         ]
 
-        self.appendToolbar("Parts Manager PLM", self.commands)
-        self.appendMenu("PLM", self.commands)
+        self.appendToolbar(
+            "Parts Manager PLM",
+            self.commands
+        )
+
+        self.appendMenu(
+            "PLM",
+            self.commands
+        )
 
         FreeCAD.Console.PrintMessage(
             "Parts Manager PLM commands initialized.\n"
         )
 
     def Activated(self):
-        return
+        pass
 
     def Deactivated(self):
-        return
+        pass
 
     def ContextMenu(self, recipient):
         self.appendContextMenu(
