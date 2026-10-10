@@ -1,4 +1,4 @@
-"""FreeCAD init script of Taack PLM module"""
+"""FreeCAD init script of Parts Manager PLM module"""
 
 # ***************************************************************************
 # *   Copyright (c) 2023 Adrien Guichard adrien.guichard@taack.org          *

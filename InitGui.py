@@ -7,16 +7,14 @@ import FreeCADGui as Gui
 def set_default_workspace_directory():
     """Set FreeCAD's default directory to the saved PLM workspace."""
 
-    import os
     from PySide import QtCore
+    import os
 
     settings = QtCore.QSettings()
-    settings.beginGroup("Taack")
-    settings.beginGroup("TaackPLM")
+    settings.beginGroup("PartsManagerPLM")
 
     workspace = settings.value("workspace", "")
 
-    settings.endGroup()
     settings.endGroup()
 
     if not workspace:
@@ -25,7 +23,9 @@ def set_default_workspace_directory():
         )
         return
 
-    workspace = os.path.abspath(os.path.expanduser(str(workspace)))
+    workspace = os.path.abspath(
+        os.path.expanduser(str(workspace))
+    )
 
     if not os.path.isdir(workspace):
         FreeCAD.Console.PrintWarning(
@@ -68,7 +68,6 @@ class PMPLMWorkbench(Workbench):
             sys.path.insert(0, module_dir)
 
         # Import existing modules.
-        import Intranet
         import Login
         import BrowseSearch
         import Workspace
@@ -80,7 +79,6 @@ class PMPLMWorkbench(Workbench):
 
         # Existing toolbar and menu commands.
         self.commands = [
-            "PMPLM_Intranet",
             "PMPLM_Login",
             "PMPLM_BrowseByTag",
             "PMPLM_Workspace",

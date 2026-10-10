@@ -270,7 +270,7 @@ class PlmUploader:
     @staticmethod
     def _get_modified_baseline():
         param = FreeCAD.ParamGet(
-            "User parameter:BaseApp/Preferences/TaackPLM"
+            "User parameter:BaseApp/Preferences/PartsManagerPLM"
         )
 
         raw = param.GetString(
@@ -286,7 +286,7 @@ class PlmUploader:
     @staticmethod
     def _save_modified_baseline(baseline):
         param = FreeCAD.ParamGet(
-            "User parameter:BaseApp/Preferences/TaackPLM"
+            "User parameter:BaseApp/Preferences/PartsManagerPLM"
         )
 
         param.SetString(
