@@ -77,7 +77,7 @@ class TaackPlmTaskPanel(object):
         if workspace:
             self.form.workspaceEdit.setText(workspace)
             self.set_freecad_working_directory(workspace)
-       
+
         # Save workspace whenever the user changes it
         QtCore.QObject.connect(
             self.form.workspaceEdit,
@@ -181,7 +181,7 @@ class TaackPlmTaskPanel(object):
         self.form.uploadProgress.setVisible(True)
         self.browseShowingParts = False
         self.update_add_to_assembly_button()
-        
+
         if self.po.connected:
             self.form.connectButton.setStyleSheet('QPushButton {color: green;}')
             self.form.connectButton.setEnabled(False)
@@ -207,7 +207,7 @@ class TaackPlmTaskPanel(object):
 
         param.SetString("WorkingDir", workspace)
         param.SetString("FileOpenSavePath", workspace)
- 
+
     def update_add_to_assembly_button(self):
         """
         Enable Add to Assembly only when the active document
@@ -390,9 +390,9 @@ class TaackPlmTaskPanel(object):
         a FreeCAD 1.1 Assembly workbench assembly.
         """
         return self.get_active_assembly() is not None
-        
-        
-        
+
+
+
     def save_workspace(self, workspace):
         self.po.settings.setValue("workspace", workspace)
         self.po.settings.sync()
@@ -400,12 +400,12 @@ class TaackPlmTaskPanel(object):
         self.set_freecad_working_directory(workspace)
     def browse_workspace(self):
         current_workspace = self.form.workspaceEdit.text().strip()
-    
+
         if current_workspace and os.path.isdir(current_workspace):
             start_directory = current_workspace
         else:
             start_directory = os.path.expanduser("~")
-    
+
         workspace = QtGui.QFileDialog.getExistingDirectory(
             self.form,
             "Select Workspace Directory",
@@ -416,9 +416,9 @@ class TaackPlmTaskPanel(object):
 
         if workspace:
             workspace = os.path.abspath(workspace)
-    
+
             self.form.workspaceEdit.setText(workspace)
-    
+
             self.po.settings.setValue(
                 "workspace",
                 workspace
@@ -426,12 +426,12 @@ class TaackPlmTaskPanel(object):
             self.po.settings.sync()
             self.form.workspaceEdit.setText(workspace)
             self.save_workspace(workspace)
-            
+
             FreeCAD.Console.PrintMessage(
                 "Workspace directory: "
                 + workspace
                 + "\n"
-            )    
+            )
     def compute_file_shaOne(self, filePath):
         sha1 = hashlib.sha1()
         with open(filePath, 'rb') as f:
@@ -1172,7 +1172,7 @@ class TaackPlmTaskPanel(object):
         self.form.uploadSizeLabel.setText(
             "Data to upload: " + size_text
         )
-        
+
     def save_preferences(self):
         self.po.user = self.form.userEdit.text()
         self.po.settings.setValue("username", self.po.user)
