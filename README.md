@@ -19,8 +19,6 @@ Under Freecad:
 
 The first time, you will be prompted for entering the server URL, along with your user credentials:
 
-![enter credential](https://raw.githubusercontent.com/Taack/taack-plm-freecad/refs/heads/main/blender-taack-plm-addons2.webp)
-
 1. Server URL Input
 2. User Login Input
 3. User Password Input
@@ -48,14 +46,10 @@ All linked files will be uploaded. There are 3 situations from here, for each fi
 
 ### Search And Download Model from the Server
 
-![download](https://raw.githubusercontent.com/Taack/taack-plm-freecad/refs/heads/main/freecad-taack-plm-search-part.webp)
-
 1. Search part tab
 2. Top Assemblies
 
 ### Duplicate Options
-
-![download](https://raw.githubusercontent.com/Taack/taack-plm-freecad/refs/heads/main/blender-taack-plm-addons2-duplicate.webp)
 
 1. Duplicate Options
 
@@ -73,7 +67,6 @@ Main Parts and modified dependencies will have a new history. Do not save the mo
 
 The part duplicated appear in details view:
 
-![Duplicated models](https://raw.githubusercontent.com/Taack/taack-plm-freecad/refs/heads/main/freecad-taack-plm-server-part-details-duplicated.webp)
 
 1. Duplicated Parts tab
 
@@ -81,8 +74,6 @@ The part duplicated appear in details view:
 ### Download a previous version
 
 From your Intranet, click on PLM icon, then you will see a list of model.
-
-![Filtering model](https://raw.githubusercontent.com/Taack/taack-plm-freecad/refs/heads/main/freecad-taack-plm-server-part-list2.webp)
 
 1. Help
 2. Filter
@@ -94,8 +85,6 @@ From your Intranet, click on PLM icon, then you will see a list of model.
    3. **Locked Parts**: Either OBSOLETED or LOCKED Status
 
 Search using filters the one you are interested in, then click on the **eye** icon.
-
-![Download model](https://raw.githubusercontent.com/Taack/taack-plm-freecad/refs/heads/main/freecad-taack-plm-server-part-details.webp)
 
 1. Selected Model preview (When the model was uploaded)
 2. Hierarchical Features Linked from other files with versions
@@ -112,8 +101,6 @@ Here you can either:
 * Download a previous version
 * Attach a file (in Attachments tab)
 
-![Access History](https://raw.githubusercontent.com/Taack/taack-plm-freecad/refs/heads/main/freecad-taack-plm-server-part-details-history.webp)
-
 1. Differences between versions
 2. Current Status
 3. Status Changes date
@@ -121,6 +108,4 @@ Here you can either:
 
 For more complex model, you can access linked files or links pointing to this model via Hierarchy tab.
 
-Sources and assets are under [LGPL 2.1 Licence](https://raw.githubusercontent.com/Taack/taack-plm-freecad/refs/heads/main/LICENSE).
 
-Please open an [issue](https://github.com/Taack/taack-plm-freecad/issues) to report bugs or other problems.
