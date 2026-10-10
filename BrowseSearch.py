@@ -749,7 +749,7 @@ class BrowseByTagPanel:
         self.dialog.show()
         self.dialog.raise_()
         self.dialog.activateWindow()
-
+        self.browse_by_tag()
 
 # ------------------------------------------------------------
 # Keep the dialog alive while open
