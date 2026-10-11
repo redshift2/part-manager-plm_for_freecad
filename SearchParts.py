@@ -945,7 +945,7 @@ class CommandPMPLMSearchParts:
         return {
             "Pixmap": os.path.join(
                 ICON_DIR,
-                "download.svg"
+                "search.svg"
             ),
             "MenuText": "Search for parts",
             "ToolTip": "Search for parts PLM server"
