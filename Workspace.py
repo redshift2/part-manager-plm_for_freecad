@@ -13,14 +13,12 @@ Features:
 
 import os
 import json
-
+import shutil
 import FreeCAD
 import FreeCADGui
-
-from PySide import QtCore, QtWidgets
-
 import Login
-
+from PySide import QtGui
+from PySide import QtCore, QtGui, QtWidgets
 
 ICON_DIR = os.path.join(
     FreeCAD.getUserAppDataDir(),
@@ -71,13 +69,9 @@ class WorkspacePanel:
 
         self.workspace_combo = QtWidgets.QComboBox()
         self.workspace_combo.setMinimumWidth(250)
-        self.workspace_combo.currentIndexChanged.connect(
-            self.workspace_changed
-        )
+        self.workspace_combo.currentIndexChanged.connect(self.workspace_changed)
 
-        workspace_layout.addWidget(
-            self.workspace_combo, 1
-        )
+        workspace_layout.addWidget(self.workspace_combo, 1)
 
         self.create_workspace_button = QtWidgets.QPushButton(
             "Create Workspace"
@@ -124,15 +118,25 @@ class WorkspacePanel:
         action_layout.addWidget(
             self.refresh_button
         )
+        self.import_button = QtWidgets.QPushButton(
+            "Import to Workspace"
+        )
+        self.import_button.clicked.connect(
+            self.import_to_workspace
+        )
 
+        action_layout.addWidget(
+            self.import_button
+        )
         layout.addLayout(action_layout)
 
         # Parts table
         self.parts_table = QtWidgets.QTableWidget()
-        self.parts_table.setColumnCount(3)
+        self.parts_table.setColumnCount(4)
 
         self.parts_table.setHorizontalHeaderLabels([
             "Local Part",
+            "Local Version",
             "Server Version",
             "PLM Status"
         ])
@@ -153,10 +157,10 @@ class WorkspacePanel:
 
         header = self.parts_table.horizontalHeader()
 
-        header.setSectionResizeMode( 0, QtWidgets.QHeaderView.Stretch)
-        header.setSectionResizeMode( 1, QtWidgets.QHeaderView.ResizeToContents)
-        header.setSectionResizeMode( 2, QtWidgets.QHeaderView.ResizeToContents)
-
+        header.setSectionResizeMode(0, QtWidgets.QHeaderView.Stretch)
+        header.setSectionResizeMode(1, QtWidgets.QHeaderView.ResizeToContents)
+        header.setSectionResizeMode(2, QtWidgets.QHeaderView.ResizeToContents)
+        header.setSectionResizeMode(3, QtWidgets.QHeaderView.ResizeToContents)
         layout.addWidget(self.parts_table, 1)
 
         # Status
@@ -170,7 +174,148 @@ class WorkspacePanel:
         close_button.clicked.connect(self.dialog.close)
 
         layout.addWidget(close_button)
+    # ---------------------------------------------------------
+    # Import files into workspace
+    # ---------------------------------------------------------
 
+    def import_to_workspace(self):
+        """Copy multiple FreeCAD documents into the workspace."""
+
+        workspace = self.current_workspace
+
+        if not workspace or not os.path.isdir(workspace):
+            self.show_error(
+                "Please select a valid workspace first."
+            )
+            return
+
+        # Allow selecting multiple FreeCAD documents.
+        file_paths, _ = QtWidgets.QFileDialog.getOpenFileNames(
+            self.dialog,
+            "Import FreeCAD Documents",
+            os.path.expanduser("~"),
+            "FreeCAD Documents (*.FCStd *.fcstd)"
+        )
+
+        if not file_paths:
+            return
+
+        # Check which selected files already exist in the workspace.
+        conflicts = []
+
+        for source_path in file_paths:
+            destination_path = os.path.join(
+                workspace,
+                os.path.basename(source_path)
+            )
+
+            if os.path.exists(destination_path):
+                conflicts.append(
+                    os.path.basename(destination_path)
+                )
+
+        overwrite = False
+
+        if conflicts:
+            message = (
+                "The following files already exist in the workspace:\n\n"
+                + "\n".join(conflicts)
+                + "\n\nOverwrite these files?"
+            )
+
+            answer = QtWidgets.QMessageBox.question(
+                self.dialog,
+                "Confirm Overwrite",
+                message,
+                QtWidgets.QMessageBox.Yes
+                | QtWidgets.QMessageBox.No,
+                QtWidgets.QMessageBox.No
+            )
+
+            if answer != QtWidgets.QMessageBox.Yes:
+                return
+
+            overwrite = True
+
+        imported_count = 0
+        skipped_count = 0
+        errors = []
+
+        for source_path in file_paths:
+            try:
+                source_path = os.path.abspath(source_path)
+                filename = os.path.basename(source_path)
+
+                destination_path = os.path.abspath(
+                    os.path.join(workspace, filename)
+                )
+
+                # Avoid copying a file onto itself.
+                if source_path == destination_path:
+                    skipped_count += 1
+                    continue
+
+                if os.path.exists(destination_path) and not overwrite:
+                    skipped_count += 1
+                    continue
+
+                # Copy the selected FreeCAD document.
+                shutil.copy2(
+                    source_path,
+                    destination_path
+                )
+
+                imported_count += 1
+
+                FreeCAD.Console.PrintMessage(
+                    "PLM: Imported {} into workspace.\n".format(
+                        destination_path
+                    )
+                )
+
+            except Exception as exc:
+                errors.append(
+                    "{}: {}".format(
+                        os.path.basename(source_path),
+                        exc
+                    )
+                )
+
+        # Refresh the local and server inventory.
+        self.refresh_parts()
+
+        # Report the outcome.
+        summary = (
+            "Import complete.\n\n"
+            "Imported: {}\n"
+            "Skipped: {}".format(
+                imported_count,
+                skipped_count
+            )
+        )
+
+        if errors:
+            summary += "\n\nErrors:\n" + "\n".join(errors)
+
+        if errors:
+            QtWidgets.QMessageBox.warning(
+                self.dialog,
+                "Import to Workspace",
+                summary
+            )
+        else:
+            self.status_label.setText(
+                "Import complete: {} file(s) imported, {} skipped.".format(
+                    imported_count,
+                    skipped_count
+                )
+            )
+
+            FreeCAD.Console.PrintMessage(
+                "PLM: {}\n".format(
+                    summary.replace("\n", " ")
+                )
+            )
     # ---------------------------------------------------------
     # Workspace settings
     # ---------------------------------------------------------
@@ -246,6 +391,7 @@ class WorkspacePanel:
 
         # Do not call refresh_parts() here.
         self.parts_table.setRowCount(0)
+
 
     def save_workspaces(self):
         """Persist the list of workspace directories."""
@@ -355,7 +501,7 @@ class WorkspacePanel:
         self.set_active_workspace()
 
     def workspace_changed(self, *_args):
-        """Handle workspace selection without blocking the UI."""
+        """Handle workspace selection and automatically refresh its parts."""
 
         workspace_path = self.workspace_combo.currentData()
 
@@ -381,11 +527,8 @@ class WorkspacePanel:
             )
         )
 
-        self.parts_table.setRowCount(0)
-
-        self.status_label.setText(
-            "Workspace selected. Click Refresh to load parts."
-        )
+        # Automatically refresh the parts table for the selected workspace.
+        self.refresh_parts()
     def set_active_workspace(self):
         """Set the selected directory as FreeCAD's working directory."""
 
@@ -497,6 +640,73 @@ class WorkspacePanel:
             key=lambda value: value.lower()
         )
 
+    # ---------------------------------------------------------
+    # Local workspace inventory
+    # ---------------------------------------------------------
+
+    def get_local_inventory(self):
+        """
+        Read locally recorded PLM part versions from workspace.json.
+
+        Returns a dictionary indexed by relative path and filename.
+        """
+
+        workspace_file = os.path.join(
+            self.current_workspace,
+            "workspace.json"
+        )
+
+        if not os.path.isfile(workspace_file):
+            return {}
+
+        try:
+            with open(workspace_file, "r", encoding="utf-8") as f:
+                workspace_data = json.load(f)
+
+        except (json.JSONDecodeError, OSError) as exc:
+            FreeCAD.Console.PrintWarning(
+                "PLM: Could not read workspace.json: {}\n".format(exc)
+            )
+            return {}
+
+        parts = workspace_data.get("parts", {})
+        inventory = {}
+
+        if not isinstance(parts, dict):
+            return inventory
+
+        for part in parts.values():
+            if not isinstance(part, dict):
+                continue
+
+            filename = str(part.get("file") or "").replace("\\", "/")
+
+            if not filename:
+                continue
+
+            version = part.get("version")
+
+            if version is None:
+                version_text = "Unknown"
+            else:
+                version_text = str(version)
+
+            entry = {
+                "version": version_text,
+                "partId": part.get("partId"),
+                "name": part.get("name", ""),
+            }
+
+            # Index by relative path.
+            inventory[filename.lower()] = entry
+
+            # Also index by filename for compatibility with entries
+            # saved before relative paths were used.
+            basename = os.path.basename(filename).lower()
+
+            inventory.setdefault(basename, entry)
+
+        return inventory
     # ---------------------------------------------------------
     # Server inventory
     # ---------------------------------------------------------
@@ -626,6 +836,24 @@ class WorkspacePanel:
                 )
 
         return inventory
+
+
+
+    def server_version_is_newer(self, local_version, server_version):
+        """Return True if the server version is greater than the local version."""
+
+        if local_version in (None, "", "Unknown", "—"):
+            return False
+
+        if server_version in (None, "", "Unknown", "—", "Not in PLM"):
+            return False
+
+        try:
+            return float(server_version) > float(local_version)
+        except (ValueError, TypeError):
+            return False
+
+
     # ---------------------------------------------------------
     # Refresh table
     # ---------------------------------------------------------
@@ -641,6 +869,7 @@ class WorkspacePanel:
             return
 
         local_parts = self.find_local_parts()
+        local_inventory = self.get_local_inventory()
 
         self.refresh_button.setEnabled(False)
         self.status_label.setText(
@@ -674,7 +903,34 @@ class WorkspacePanel:
                 0,
                 local_item
             )
+            # Local version from workspace.json.
+            normalized_path = (
+                relative_path.replace("\\", "/").lower()
+            )
 
+            filename = os.path.basename(
+                relative_path
+            ).lower()
+
+            local_part = local_inventory.get(normalized_path)
+
+            if local_part is None:
+                local_part = local_inventory.get(filename)
+
+            if local_part is None:
+                local_version_text = "—"
+            else:
+                local_version_text = local_part["version"]
+
+            local_version_item = QtWidgets.QTableWidgetItem(
+                local_version_text
+            )
+
+            self.parts_table.setItem(
+                row,
+                1,
+                local_version_item
+            )
             version_text = "Unknown"
 
             if inventory is not None:
@@ -703,9 +959,23 @@ class WorkspacePanel:
                 version_text
             )
 
+            # Flag the server version in red if it is newer
+            # than the locally recorded version.
+            if server_part is not None and local_part is not None:
+                if self.server_version_is_newer(
+                        local_part.get("version"),
+                        server_part.get("version")
+                ):
+                    version_item.setForeground(
+                        QtGui.QBrush(QtGui.QColor("red"))
+                    )
+                    version_item.setToolTip(
+                        "A newer version is available on the PLM server."
+                    )
+
             self.parts_table.setItem(
                 row,
-                1,
+                2,
                 version_item
             )
 
@@ -740,7 +1010,7 @@ class WorkspacePanel:
 
             self.parts_table.setItem(
                 row,
-                2,
+                3,
                 status_item
             )
 

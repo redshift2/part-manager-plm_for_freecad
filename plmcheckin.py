@@ -637,6 +637,55 @@ class PlmCheckInDialog(QtGui.QDialog):
 
         return "Not in PLM"
 
+    def _style_row(self, row, modified, included):
+        """Style rows according to modification and inclusion state."""
+
+        grey = QtGui.QColor(130, 130, 130)
+        highlight = QtGui.QColor(255, 220, 120)
+        highlightfont = QtGui.QColor(0,0,0)
+        # Store each item's original foreground color so that styling
+        # can be reversed without losing special colors such as LOCKED.
+        original_foreground_role = USER_ROLE + 1
+
+        for column in range(self.table.columnCount()):
+            item = self.table.item(row, column)
+
+            if item is None:
+                continue
+
+            # Save the original foreground only once.
+            original_foreground = item.data(original_foreground_role)
+
+            if original_foreground is None:
+                original_foreground = item.foreground()
+                item.setData(
+                    original_foreground_role,
+                    original_foreground
+                )
+
+            # Preserve bold formatting on the active document label.
+            font = item.font()
+            font.setItalic(not (modified or included))
+            item.setFont(font)
+
+            if modified or included:
+                # Restore the original text color.
+                item.setForeground(original_foreground)
+            else:
+                # Unmodified and excluded: grey, italic text.
+                item.setForeground(QtGui.QBrush(grey))
+
+            # Clear any previous highlight.
+            item.setBackground(QtGui.QBrush())
+
+        # Highlight "No" when an unmodified document is included.
+        modified_item = self.table.item(row, self.COL_MODIFIED)
+
+        if modified_item is not None and not modified and included:
+            modified_item.setBackground(QtGui.QBrush(highlight))
+            modified_item.setForeground(QtGui.QBrush(highlightfont))
+
+
     def _populate_table(self):
         self._loading_table = True
         self.table.setRowCount(0)
@@ -776,11 +825,41 @@ class PlmCheckInDialog(QtGui.QDialog):
 
             self.document_by_name[name] = doc
 
-        self._loading_table = False
+            # Apply styling to this row before moving to the next document.
+            include_item = self.table.item(row, self.COL_INCLUDE)
+
+            included = (
+                    include_item is not None
+                    and include_item.checkState() == CHECKED
+            )
+
+            self._style_row(row, modified, included)
+
+            # End table population after every row has been processed.
+            self._loading_table = False
 
     def _item_changed(self, item):
-        if not self._loading_table and item.column() == self.COL_INCLUDE:
+        if self._loading_table:
+            return
+
+        if item.column() == self.COL_INCLUDE:
+            row = item.row()
+
+            modified_item = self.table.item(
+                row,
+                self.COL_MODIFIED
+            )
+
+            modified = (
+                    modified_item is not None
+                    and _text(modified_item.text()).lower() == "yes"
+            )
+
+            included = item.checkState() == CHECKED
+
+            self._style_row(row, modified, included)
             self._update_size()
+
 
     def included_documents(self):
         result = []
@@ -800,13 +879,30 @@ class PlmCheckInDialog(QtGui.QDialog):
 
     def set_all_included(self, include):
         self._loading_table = True
+
         state = CHECKED if include else UNCHECKED
+
         for row in range(self.table.rowCount()):
             item = self.table.item(row, self.COL_INCLUDE)
+
             if item:
                 item.setCheckState(state)
+
+            modified_item = self.table.item(
+                row,
+                self.COL_MODIFIED
+            )
+
+            modified = (
+                    modified_item is not None
+                    and _text(modified_item.text()).lower() == "yes"
+            )
+
+            self._style_row(row, modified, include)
+
         self._loading_table = False
         self._update_size()
+
 
     def remove_selected(self):
         rows = sorted({idx.row() for idx in self.table.selectionModel().selectedRows()}, reverse=True)
