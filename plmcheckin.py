@@ -123,8 +123,7 @@ def collect_documents(root_doc):
 
 
 class PlmCheckInDialog(QtGui.QDialog):
-    COL_INCLUDE, COL_PART, COL_FILE, COL_STATUS, COL_SIZE = range(5)
-
+    COL_INCLUDE, COL_PART, COL_FILE, COL_STATUS, COL_VERSION, COL_MODIFIED, COL_SIZE = range(7)
     def __init__(self, parent=None):
         super(PlmCheckInDialog, self).__init__(parent)
         self.setWindowTitle('PLM Check-In')
@@ -139,6 +138,48 @@ class PlmCheckInDialog(QtGui.QDialog):
         self._build_ui()
         self.refresh()
 
+    def _document_modified(self, doc):
+        """Compare the local file modification time with its upload baseline."""
+
+        path = document_path(doc)
+
+        # Unsaved or missing files cannot be compared reliably.
+        if not path or not os.path.isfile(path):
+            return True
+
+        baseline = plmupload.PlmUploader._get_modified_baseline()
+
+        active_doc = FreeCAD.ActiveDocument
+
+        if active_doc is None:
+            return True
+
+        assembly_path = document_path(active_doc)
+
+        if not assembly_path:
+            return True
+
+        assembly_baseline = baseline.get(
+            os.path.abspath(assembly_path),
+            {}
+        )
+
+        absolute_path = os.path.abspath(path)
+
+        previous_mtime = assembly_baseline.get(absolute_path)
+
+        current_mtime = plmupload.PlmUploader._get_file_mtime_ns(
+            absolute_path
+        )
+
+        if current_mtime is None:
+            return True
+
+        # No baseline means that we cannot confirm the file is unchanged.
+        if previous_mtime is None:
+            return True
+
+        return current_mtime > int(previous_mtime)
     def _build_ui(self):
         layout = QtGui.QVBoxLayout(self)
         info = QtGui.QGridLayout()
@@ -152,10 +193,16 @@ class PlmCheckInDialog(QtGui.QDialog):
         info.addWidget(self.size_label, 1, 2)
         layout.addLayout(info)
 
-        self.table = QtGui.QTableWidget(0, 5)
-        self.table.setHorizontalHeaderLabels(
-            ['Include', 'Part / Document', 'File', 'PLM Status', 'File Size']
-        )
+        self.table = QtGui.QTableWidget(0, 7)
+        self.table.setHorizontalHeaderLabels([
+            'Include',
+            'Part / Document',
+            'File',
+            'PLM Status',
+            'Version',
+            'Modified',
+            'File Size'
+        ])
         self.table.setAlternatingRowColors(True)
         self.table.setSelectionBehavior(QtGui.QAbstractItemView.SelectRows)
         self.table.setSelectionMode(QtGui.QAbstractItemView.ExtendedSelection)
@@ -163,17 +210,23 @@ class PlmCheckInDialog(QtGui.QDialog):
         hv = self.table.horizontalHeader()
         try:
             mode = QtGui.QHeaderView.ResizeMode
-            hv.setSectionResizeMode(0, mode.ResizeToContents)
-            hv.setSectionResizeMode(1, mode.ResizeToContents)
-            hv.setSectionResizeMode(2, mode.Stretch)
-            hv.setSectionResizeMode(3, mode.ResizeToContents)
-            hv.setSectionResizeMode(4, mode.ResizeToContents)
+
+            hv.setSectionResizeMode(self.COL_INCLUDE, mode.ResizeToContents)
+            hv.setSectionResizeMode(self.COL_PART, mode.ResizeToContents)
+            hv.setSectionResizeMode(self.COL_FILE, mode.Stretch)
+            hv.setSectionResizeMode(self.COL_STATUS, mode.ResizeToContents)
+            hv.setSectionResizeMode(self.COL_VERSION, mode.ResizeToContents)
+            hv.setSectionResizeMode(self.COL_MODIFIED, mode.ResizeToContents)
+            hv.setSectionResizeMode(self.COL_SIZE, mode.ResizeToContents)
+
         except AttributeError:
-            hv.setResizeMode(0, QtGui.QHeaderView.ResizeToContents)
-            hv.setResizeMode(1, QtGui.QHeaderView.ResizeToContents)
-            hv.setResizeMode(2, QtGui.QHeaderView.Stretch)
-            hv.setResizeMode(3, QtGui.QHeaderView.ResizeToContents)
-            hv.setResizeMode(4, QtGui.QHeaderView.ResizeToContents)
+            hv.setResizeMode(self.COL_INCLUDE, QtGui.QHeaderView.ResizeToContents)
+            hv.setResizeMode(self.COL_PART, QtGui.QHeaderView.ResizeToContents)
+            hv.setResizeMode(self.COL_FILE, QtGui.QHeaderView.Stretch)
+            hv.setResizeMode(self.COL_STATUS, QtGui.QHeaderView.ResizeToContents)
+            hv.setResizeMode(self.COL_VERSION, QtGui.QHeaderView.ResizeToContents)
+            hv.setResizeMode(self.COL_MODIFIED, QtGui.QHeaderView.ResizeToContents)
+            hv.setResizeMode(self.COL_SIZE, QtGui.QHeaderView.ResizeToContents)
         layout.addWidget(self.table, 1)
 
         self.status_label = QtGui.QLabel('Ready.')
@@ -518,62 +571,71 @@ class PlmCheckInDialog(QtGui.QDialog):
                 'Found {} document(s) including linked parts.'
                 .format(len(self.documents))
             )
-    def _plm_status(self, doc):
+
+    def _server_entry(self, doc):
+        """Find the server inventory record for a FreeCAD document."""
+
         path = document_path(doc)
-        candidates = []
 
-        if path:
-            filename = os.path.basename(path).lower()
-            candidates.append(filename)
+        if not path:
+            return {}
 
-            workspace = self._connection()[3]
+        candidates = [
+            os.path.basename(path).lower()
+        ]
 
-            if workspace:
-                workspace_abs = os.path.abspath(
-                    os.path.expanduser(workspace)
+        workspace = self._connection()[3]
+
+        if workspace:
+            workspace_abs = os.path.abspath(
+                os.path.expanduser(workspace)
+            )
+
+            try:
+                relative_path = os.path.relpath(
+                    path,
+                    workspace_abs
                 )
+            except (ValueError, OSError):
+                relative_path = os.path.basename(path)
 
-                try:
-                    relative_path = os.path.relpath(
-                        path,
-                        workspace_abs
-                    )
-                except (ValueError, OSError):
-                    relative_path = os.path.basename(path)
+            relative_path = relative_path.replace("\\", "/").lower()
 
-                # Match Workspace.py's path normalization.
-                relative_path = relative_path.replace("\\", "/").lower()
-
-                if (
-                        relative_path != ".."
-                        and not relative_path.startswith("../")
-                ):
-                    candidates.insert(0, relative_path)
+            if (
+                    relative_path != ".."
+                    and not relative_path.startswith("../")
+            ):
+                candidates.insert(0, relative_path)
 
         for candidate in candidates:
             entry = self.server_parts.get(candidate)
 
-            if not entry:
-                continue
+            if entry:
+                return entry
 
-            # The inventory entry stores the original server response here.
-            part = entry.get("part", {})
+        return {}
 
-            status = (
-                    entry.get("status")
-                    or part.get("plmStatus")
-                    or part.get("status")
-            )
+    def _plm_status(self, doc):
+        entry = self._server_entry(doc)
 
-            if status:
-                return _text(status)
+        if not entry:
+            return "Not found" if self.server_parts else "Unavailable"
 
-            if entry.get("exists", part.get("existsInPlm", False)):
-                return "In PLM"
+        part = entry.get("part", {})
 
-            return "Not in PLM"
+        status = (
+                entry.get("status")
+                or part.get("plmStatus")
+                or part.get("status")
+        )
 
-        return "Not found" if self.server_parts else "Unavailable"
+        if status:
+            return _text(status)
+
+        if entry.get("exists", part.get("existsInPlm", False)):
+            return "In PLM"
+
+        return "Not in PLM"
 
     def _populate_table(self):
         self._loading_table = True
@@ -582,40 +644,138 @@ class PlmCheckInDialog(QtGui.QDialog):
         for doc in self.documents:
             row = self.table.rowCount()
             self.table.insertRow(row)
+
             name = _text(getattr(doc, 'Name', ''))
             label = _text(getattr(doc, 'Label', name))
             path = document_path(doc)
             size = document_size(doc)
 
-            include = QtGui.QTableWidgetItem()
-            include.setFlags(include.flags() | QtCore.Qt.ItemIsUserCheckable)
-            include.setCheckState(CHECKED)
-            include.setData(USER_ROLE, name)
-            self.table.setItem(row, self.COL_INCLUDE, include)
+            # Determine modification state.
+            modified = self._document_modified(doc)
 
-            part_item = QtGui.QTableWidgetItem(label + (' (active)' if name == active_name else ''))
+            # Retrieve the server inventory record.
+            entry = self._server_entry(doc)
+
+            server_version = (
+                entry.get('version', '—')
+                if entry
+                else '—'
+            )
+
+            # Include column.
+            include = QtGui.QTableWidgetItem()
+            include.setFlags(
+                include.flags() | QtCore.Qt.ItemIsUserCheckable
+            )
+
+            include.setCheckState(
+                CHECKED if modified else UNCHECKED
+            )
+
+            include.setData(USER_ROLE, name)
+
+            self.table.setItem(
+                row,
+                self.COL_INCLUDE,
+                include
+            )
+
+            # Part / Document column.
+            part_item = QtGui.QTableWidgetItem(
+                label + (' (active)' if name == active_name else '')
+            )
+
             part_item.setData(USER_ROLE, name)
+
             if name == active_name:
                 font = part_item.font()
                 font.setBold(True)
                 part_item.setFont(font)
-            self.table.setItem(row, self.COL_PART, part_item)
 
-            file_item = QtGui.QTableWidgetItem(os.path.basename(path) if path else '(unsaved document)')
-            file_item.setToolTip(path or 'Save this document before check-in.')
-            self.table.setItem(row, self.COL_FILE, file_item)
+            self.table.setItem(
+                row,
+                self.COL_PART,
+                part_item
+            )
 
+            # File column.
+            file_item = QtGui.QTableWidgetItem(
+                os.path.basename(path)
+                if path
+                else '(unsaved document)'
+            )
+
+            file_item.setToolTip(
+                path or 'Save this document before check-in.'
+            )
+
+            self.table.setItem(
+                row,
+                self.COL_FILE,
+                file_item
+            )
+
+            # PLM Status column.
             status = self._plm_status(doc)
-            status_item = QtGui.QTableWidgetItem(status)
-            if status.upper() == 'LOCKED':
-                status_item.setForeground(QtGui.QBrush(QtGui.QColor(200, 0, 0)))
-            self.table.setItem(row, self.COL_STATUS, status_item)
 
-            size_item = QtGui.QTableWidgetItem(format_bytes(size))
+            status_item = QtGui.QTableWidgetItem(status)
+
+            if status.upper() == 'LOCKED':
+                status_item.setForeground(
+                    QtGui.QBrush(QtGui.QColor(200, 0, 0))
+                )
+
+            self.table.setItem(
+                row,
+                self.COL_STATUS,
+                status_item
+            )
+
+            # Version column.
+            version_item = QtGui.QTableWidgetItem(
+                _text(server_version)
+            )
+
+            version_item.setTextAlignment(ALIGN_RIGHT)
+
+            self.table.setItem(
+                row,
+                self.COL_VERSION,
+                version_item
+            )
+
+            # Modified column.
+            modified_item = QtGui.QTableWidgetItem(
+                'Yes' if modified else 'No'
+            )
+
+            modified_item.setData(
+                USER_ROLE,
+                modified
+            )
+
+            self.table.setItem(
+                row,
+                self.COL_MODIFIED,
+                modified_item
+            )
+
+            # File Size column.
+            size_item = QtGui.QTableWidgetItem(
+                format_bytes(size)
+            )
+
             size_item.setTextAlignment(ALIGN_RIGHT)
             size_item.setData(USER_ROLE, size)
-            self.table.setItem(row, self.COL_SIZE, size_item)
+
+            self.table.setItem(
+                row,
+                self.COL_SIZE,
+                size_item
+            )
+
             self.document_by_name[name] = doc
+
         self._loading_table = False
 
     def _item_changed(self, item):
