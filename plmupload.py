@@ -509,6 +509,26 @@ class PlmUploader:
                 else doc.Uid
             )
 
+            FreeCAD.Console.PrintMessage(
+                "\n===== PLM DOCUMENT METADATA =====\n"
+                "Document name: {!r}\n"
+                "Document label: {!r}\n"
+                "Document Id: {!r}\n"
+                "Document Uid: {!r}\n"
+                "Protobuf id: {!r}\n"
+                "Filename: {!r}\n"
+                "SHA-1: {!r}\n"
+                "=================================\n".format(
+                    doc.Name,
+                    doc.Label,
+                    getattr(doc, "Id", None),
+                    getattr(doc, "Uid", None),
+                    plm_file.id,
+                    filename,
+                    plm_file.sha1hex,
+                )
+            )
+
             plm_file.label = doc.Label
             plm_file.comment = getattr(doc, "Comment", "")
             plm_file.fileName = filename
@@ -677,16 +697,43 @@ class PlmUploader:
 
     @staticmethod
     def _parse_bucket_response(response):
-        response.raise_for_status()
+        """
+        Parse a binary protobuf Bucket returned by the PLM server.
+        Include useful diagnostics for HTTP and response-format errors.
+        """
+
+        if not response.ok:
+            body = response.text[:5000]
+
+            raise PlmUploadError(
+                "PLM server returned HTTP {}.\n"
+                "URL: {}\n"
+                "Response: {}".format(
+                    response.status_code,
+                    response.url,
+                    body,
+                )
+            )
 
         bucket = PlmBuf.Bucket()
 
         try:
             bucket.ParseFromString(response.content)
+
         except Exception as exc:
             raise PlmUploadError(
-                "The server returned an invalid protobuf response: "
-                + str(exc)
+                "The PLM server returned an invalid protobuf response.\n"
+                "HTTP status: {}\n"
+                "Content-Type: {}\n"
+                "Response length: {} bytes\n"
+                "Response preview: {}\n"
+                "Parsing error: {}".format(
+                    response.status_code,
+                    response.headers.get("Content-Type", "unknown"),
+                    len(response.content),
+                    response.text[:2000],
+                    exc,
+                )
             )
 
         return bucket
@@ -815,19 +862,39 @@ class PlmUploader:
                 response_bucket = self._parse_bucket_response(response)
 
                 if response_bucket.status != PlmBuf.ServerStatus.OK_FILES:
-                    raise PlmUploadError(
-                        "The PLM server rejected file ZIP {}.".format(
-                            group_index + 1
-                        )
-                    )
                     FreeCAD.Console.PrintError(
                         "\n===== PLM UPLOAD REJECTION DEBUG =====\n"
                     )
-
                     FreeCAD.Console.PrintError(
-                        f"HTTP status: {response.status_code}\n"
+                        "HTTP status: {}\n".format(response.status_code)
+                    )
+                    FreeCAD.Console.PrintError(
+                        "Response body: {}\n".format(response.text[:5000])
+                    )
+                    FreeCAD.Console.PrintError(
+                        "======================================\n"
                     )
 
+                    if response_bucket.status != PlmBuf.ServerStatus.OK_FILES:
+                        FreeCAD.Console.PrintError(
+                            "\n===== PLM UPLOAD REJECTION DEBUG =====\n"
+                            "ZIP group: {}\n"
+                            "HTTP status: {}\n"
+                            "URL: {}\n"
+                            "Response body: {}\n"
+                            "======================================\n".format(
+                                group_index + 1,
+                                response.status_code,
+                                response.url,
+                                response.text[:5000],
+                            )
+                        )
+
+                        raise PlmUploadError(
+                            "The PLM server rejected file ZIP {}.".format(
+                                group_index + 1
+                            )
+                        )
                     FreeCAD.Console.PrintError(
                         f"Response body: {response.text[:5000]}\n"
                     )

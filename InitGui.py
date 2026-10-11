@@ -12,14 +12,16 @@ def set_default_workspace_directory():
 
     from PySide import QtCore
 
-    settings = QtCore.QSettings()
-    settings.beginGroup("Taack")
-    settings.beginGroup("TaackPLM")
+    settings = QtCore.QSettings(
+        QtCore.QSettings.IniFormat,
+        QtCore.QSettings.UserScope,
+        "PMPLM",
+        "PartsManager"
+    )
 
     workspace = settings.value("workspace", "")
 
-    settings.endGroup()
-    settings.endGroup()
+
 
     if not workspace:
         FreeCAD.Console.PrintMessage(
@@ -64,7 +66,7 @@ class PMPLMWorkbench(Workbench):
 
         self.__class__.Icon = os.path.join(self.icon_dir, "icon.png")
 
-        self.__class__.MenuText = "Parts Manager PLM"
+        self.__class__.MenuText = "PLM - Parts Manager"
         self.__class__.ToolTip = ("Parts Manager PLM Workbench")
 
     def Initialize(self):

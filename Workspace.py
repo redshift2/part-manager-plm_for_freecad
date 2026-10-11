@@ -84,16 +84,21 @@ class WorkspacePanel:
         self.workspace_path_label.setWordWrap(True)
         layout.addWidget(self.workspace_path_label)
 
-        # Workspace actions: Set Active Workspace and Refresh
+        # Workspace actions
         action_layout = QtWidgets.QHBoxLayout()
 
-        self.set_workspace_button = QtWidgets.QPushButton("Set as Active Workspace")
-        self.set_workspace_button.clicked.connect(self.set_active_workspace)
+        self.set_workspace_button = QtWidgets.QPushButton( "Set as Active Workspace")
+        self.set_workspace_button.clicked.connect( self.set_active_workspace)
         action_layout.addWidget(self.set_workspace_button)
+
+        self.delete_workspace_button = QtWidgets.QPushButton( "Delete Workspace")
+        self.delete_workspace_button.clicked.connect( self.delete_workspace)
+        action_layout.addWidget(self.delete_workspace_button)
 
         self.refresh_button = QtWidgets.QPushButton("Refresh")
         self.refresh_button.clicked.connect(self.refresh_parts)
         action_layout.addWidget(self.refresh_button)
+
 
         action_layout.addStretch()
         layout.addLayout(action_layout)
@@ -293,6 +298,154 @@ class WorkspacePanel:
                     summary.replace("\n", " ")
                 )
             )
+
+    # ---------------------------------------------------------
+    # Delete Workspace
+    # ---------------------------------------------------------
+
+    def delete_workspace(self):
+        """Delete the selected workspace and remove it from saved settings."""
+
+        workspace_path = self.workspace_combo.currentData()
+
+        if not workspace_path:
+            self.show_error(
+                "Please select a workspace to delete."
+            )
+            return
+
+        workspace_path = os.path.realpath(
+            os.path.abspath(
+                os.path.expanduser(str(workspace_path))
+            )
+        )
+
+        if not os.path.isdir(workspace_path):
+            self.show_error(
+                "The workspace directory does not exist:\n{}".format(
+                    workspace_path
+                )
+            )
+            return
+
+        # Prevent deletion if a FreeCAD document is open from this workspace.
+        for doc in FreeCAD.listDocuments().values():
+            doc_path = getattr(doc, "FileName", "")
+
+            if not doc_path:
+                continue
+
+            doc_path = os.path.realpath(doc_path)
+
+            try:
+                inside_workspace = (
+                    os.path.commonpath(
+                        [workspace_path, doc_path]
+                    ) == workspace_path
+                )
+            except ValueError:
+                inside_workspace = False
+
+            if inside_workspace:
+                self.show_error(
+                    "Cannot delete this workspace because a FreeCAD "
+                    "document from it is open:\n\n"
+                    "{}\n\n"
+                    "Close the document and try again.".format(
+                        doc_path
+                    )
+                )
+                return
+
+        # Confirm permanent deletion.
+        answer = QtWidgets.QMessageBox.warning(
+            self.dialog,
+            "Delete Workspace",
+            "Are you sure you want to permanently delete this workspace?\n\n"
+            "{}\n\n"
+            "All files and subdirectories inside this workspace "
+            "will be deleted. This operation cannot be undone."
+            .format(workspace_path),
+            QtWidgets.QMessageBox.Yes | QtWidgets.QMessageBox.No,
+            QtWidgets.QMessageBox.No
+        )
+
+        if answer != QtWidgets.QMessageBox.Yes:
+            return
+
+        try:
+            # Delete the directory and all its contents.
+            shutil.rmtree(workspace_path)
+
+        except Exception as exc:
+            self.show_error(
+                "Could not delete workspace:\n\n{}".format(exc)
+            )
+            return
+
+        # Remove the workspace from the saved list.
+        self.workspaces = [
+            path for path in self.workspaces
+            if os.path.realpath(os.path.abspath(path))
+            != workspace_path
+        ]
+
+        self.save_workspaces()
+
+        # Update the workspace dropdown without triggering multiple refreshes.
+        self.workspace_combo.blockSignals(True)
+        self.workspace_combo.clear()
+
+        for path in self.workspaces:
+            self.workspace_combo.addItem(
+                os.path.basename(path) or path,
+                path
+            )
+
+        if self.workspace_combo.count() > 0:
+            self.workspace_combo.setCurrentIndex(0)
+
+            new_workspace = str(
+                self.workspace_combo.currentData()
+            )
+
+            self.settings.setValue(
+                "workspace",
+                new_workspace
+            )
+        else:
+            new_workspace = ""
+
+            self.settings.remove("workspace")
+
+        self.settings.sync()
+        self.workspace_combo.blockSignals(False)
+
+        # Update the active workspace selection and table.
+        self.current_workspace = new_workspace
+
+        if new_workspace and os.path.isdir(new_workspace):
+            self.workspace_path_label.setText(
+                "Workspace directory: {}".format(new_workspace)
+            )
+        else:
+            self.workspace_path_label.setText(
+                "Workspace directory: Not selected"
+            )
+
+        self.refresh_parts()
+
+        QtWidgets.QMessageBox.information(
+            self.dialog,
+            "Delete Workspace",
+            "Workspace deleted successfully:\n\n{}".format(
+                workspace_path
+            )
+        )
+
+        FreeCAD.Console.PrintMessage(
+            "PLM: Deleted workspace: {}\n".format(workspace_path)
+        )
     # ---------------------------------------------------------
     # Workspace settings
     # ---------------------------------------------------------
@@ -703,18 +856,22 @@ class WorkspacePanel:
             if not os.path.isfile(local_path):
                 continue
 
+            # Normalize paths to match the inventory dictionary keys.
+            normalized_path = relative_path.replace("\\", "/").lower()
+            filename_key = os.path.basename(normalized_path)
+
             # Resolve local inventory metadata.
             local_entry = (
-                    local_inventory.get(relative_path)
-                    or local_inventory.get(os.path.basename(relative_path))
-                    or {}
+                local_inventory.get(normalized_path)
+                or local_inventory.get(filename_key)
+                or {}
             )
 
             # Resolve server inventory metadata.
             server_entry = (
-                    server_inventory.get(relative_path)
-                    or server_inventory.get(os.path.basename(relative_path))
-                    or {}
+                server_inventory.get(normalized_path)
+                or server_inventory.get(filename_key)
+                or {}
             )
 
             local_version = local_entry.get("version")
@@ -723,9 +880,17 @@ class WorkspacePanel:
             if not server_entry.get("exists", False):
                 continue
 
-            if not self.server_version_is_newer(
-                    local_version,
-                    server_version
+            # If the local version is unknown, offer to sync when
+            # the server has a valid version.
+            if local_version in (None, "", "Unknown", "—"):
+                if server_version in (
+                    None, "", "Unknown", "—", "Not in PLM"
+                ):
+                    continue
+
+            elif not self.server_version_is_newer(
+                local_version,
+                server_version
             ):
                 continue
 
