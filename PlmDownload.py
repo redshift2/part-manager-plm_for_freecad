@@ -11,7 +11,10 @@ import tempfile
 import shutil
 import json
 import FreeCAD
-
+from WorkspaceInventory import (
+    save_workspace_part,
+    save_workspace_inventory,
+)
 
 def get_active_workspace():
     """
@@ -50,91 +53,24 @@ def get_active_workspace():
 
     return workspace
 
-def _save_workspace_part(workspace, part_id, part_data, destination_path):
-    """Record a downloaded PLM part and its server version in workspace.json."""
-
-    workspace_file = os.path.join(workspace, "workspace.json")
-
-    # Read existing workspace inventory.
-    if os.path.isfile(workspace_file):
-        try:
-            with open(workspace_file, "r", encoding="utf-8") as f:
-                workspace_data = json.load(f)
-        except (json.JSONDecodeError, OSError):
-            workspace_data = {}
-    else:
-        workspace_data = {}
-
-    parts = workspace_data.setdefault("parts", {})
-
-    # Retrieve the existing entry before determining the version.
-    existing = parts.get(str(part_id), {})
-
-    if not isinstance(existing, dict):
-        existing = {}
-
-    # Initialize the version.
-    version = None
-
-    # Get the version from the latest part information.
-    if isinstance(part_data, dict):
-        for key in ("computedVersion", "latestVersion", "version"):
-            if part_data.get(key) is not None:
-                version = part_data[key]
-                break
-
-    # Preserve the previously saved version if no new version is available.
-    if version is None:
-        version = existing.get("version")
-
-    part_name = os.path.basename(destination_path)
-
-    if isinstance(part_data, dict):
-        part_name = (
-            part_data.get("originalName")
-            or part_data.get("name")
-            or part_data.get("label")
-            or existing.get("name")
-            or part_name
-        )
-
-    # Update the workspace inventory.
-    parts[str(part_id)] = {
-        "partId": part_id,
-        "name": part_name,
-        "version": version,
-        "file": os.path.relpath(
-            destination_path, workspace
-        ).replace("\\", "/"),
-    }
-
-    # Write atomically.
-    fd, temp_path = tempfile.mkstemp(
-        prefix="workspace_",
-        suffix=".json.tmp",
-        dir=workspace,
-    )
-
-    try:
-        with os.fdopen(fd, "w", encoding="utf-8") as f:
-            json.dump(workspace_data, f, indent=4)
-            f.write("\n")
-
-        os.replace(temp_path, workspace_file)
-
-    finally:
-        if os.path.exists(temp_path):
-            os.remove(temp_path)
-
-    FreeCAD.Console.PrintMessage(
-        "PLM: Saved part {} with version {} to workspace.json.\n".format(
-            part_id, version
-        )
-    )
-
-def download_part(connection, part_id, part_data=None, workspace=None):
+def download_part(
+        connection,
+        part_id,
+        part_data=None,
+        workspace=None,
+        force=False,
+        destination_path=None,
+):
     """
     Download a PLM part and extract its FreeCAD document into the workspace.
+
+    Args:
+        connection: Authenticated PLM connection.
+        part_id: PLM part ID.
+        part_data: Optional PLM metadata.
+        workspace: Destination workspace directory.
+        force: Download even if the destination file already exists.
+        destination_path: Optional explicit destination path.
 
     Returns:
         str: Path to the downloaded .FCStd file on success.
@@ -195,9 +131,13 @@ def download_part(connection, part_id, part_data=None, workspace=None):
         else:
             expected_filename = "plm_part_{}.FCStd".format(part_id)
 
-        destination_path = os.path.abspath(
-            os.path.join(workspace, expected_filename)
-        )
+        # Determine the destination path.
+        if destination_path:
+            destination_path = os.path.abspath( os.path.expanduser(str(destination_path)))
+        else:
+            destination_path = os.path.abspath( os.path.join(workspace, expected_filename))
+
+
 
         # Ensure the destination is inside the workspace.
         if os.path.commonpath([workspace, destination_path]) != workspace:
@@ -211,13 +151,13 @@ def download_part(connection, part_id, part_data=None, workspace=None):
                 )
             )
 
-            _save_workspace_inventory(
+            save_workspace_inventory(
                 connection,
                 workspace,
                 [destination_path],
             )
 
-            _save_workspace_part(
+            save_workspace_part(
                 workspace,
                 part_id,
                 part_data,
@@ -275,13 +215,39 @@ def download_part(connection, part_id, part_data=None, workspace=None):
                 )
             )
 
+            # Check every archive destination before extracting anything.
+            # This prevents a partial extraction if a linked document
+            # is open in FreeCAD with unsaved changes.
+            for entry in archive_entries:
+                archive_name = entry.filename
+                normalized_name = (archive_name.replace("\\", "/").lstrip("/") )
+
+                path_parts = normalized_name.split("/")
+
+                if (not normalized_name or ".." in path_parts or os.path.isabs(normalized_name)):
+                    continue
+
+                output_path = os.path.abspath( os.path.join(workspace, *path_parts))
+
+                if os.path.commonpath( [workspace, output_path]) != workspace:
+                    raise RuntimeError(
+                        "Archive entry escapes workspace: {}".format(
+                            archive_name
+                        )
+                    )
+
+                if _has_unsaved_open_document(output_path):
+                    raise RuntimeError(
+                        "Cannot update archive: '{}' is open in "
+                        "FreeCAD with unsaved changes.".format(
+                            output_path
+                        )
+                    )
             # Identify all FreeCAD documents and log the archive.
             for entry in archive_entries:
                 name = entry.filename
 
-                FreeCAD.Console.PrintMessage(
-                    "  {}\n".format(name)
-                )
+                FreeCAD.Console.PrintMessage( "  {}\n".format(name))
 
                 if entry.is_dir():
                     continue
@@ -290,11 +256,7 @@ def download_part(connection, part_id, part_data=None, workspace=None):
                 path_parts = normalized_name.split("/")
 
                 # Reject unsafe paths.
-                if (
-                        not normalized_name
-                        or ".." in path_parts
-                        or os.path.isabs(normalized_name)
-                ):
+                if ( not normalized_name or ".." in path_parts or os.path.isabs(normalized_name)):
                     FreeCAD.Console.PrintWarning(
                         "PLM: Skipping unsafe archive entry: {}\n".format(
                             name
@@ -427,7 +389,21 @@ def download_part(connection, part_id, part_data=None, workspace=None):
             "PLM: Extracted {} files.\n".format(extracted_count)
         )
 
-        destination_path = main_document_path
+        extracted_main_path = main_document_path
+        requested_destination = os.path.abspath(destination_path)
+
+        if extracted_main_path != requested_destination:
+            os.makedirs(
+                os.path.dirname(requested_destination),
+                exist_ok=True
+            )
+
+            shutil.move(
+                extracted_main_path,
+                requested_destination
+            )
+
+        destination_path = requested_destination
 
         FreeCAD.Console.PrintMessage(
             "PLM: Main document: {}\n".format(destination_path)
@@ -454,14 +430,14 @@ def download_part(connection, part_id, part_data=None, workspace=None):
                 extracted_fcstd_paths.append(extracted_path)
 
         # Refresh metadata for the assembly and all linked documents.
-        _save_workspace_inventory(
+        save_workspace_inventory(
             connection,
             workspace,
             extracted_fcstd_paths,
         )
 
         # Ensure the explicitly requested PLM part is also recorded.
-        _save_workspace_part(
+        save_workspace_part(
             workspace,
             part_id,
             part_data,
@@ -633,226 +609,26 @@ def get_part_information(
 
     return part_data
 
-def _save_workspace_inventory(connection, workspace, fcstd_paths):
-    """
-    Update workspace.json with PLM metadata for all FreeCAD documents
-    extracted from an assembly archive.
+def _has_unsaved_open_document(file_path):
+    """Return True if the file is open in FreeCAD with unsaved changes."""
 
-    fcstd_paths: Absolute paths to the extracted .FCStd files.
-    """
-
-    server_url = getattr(connection, "url", "").rstrip("/")
-    session = getattr(connection, "session", None)
-
-    if not server_url or session is None:
-        FreeCAD.Console.PrintWarning(
-            "PLM: Cannot update assembly inventory: invalid connection.\n"
-        )
-        return
-
-    workspace = os.path.abspath(workspace)
-
-    request_parts = []
-    local_paths = {}
-
-    for path in fcstd_paths:
-        path = os.path.abspath(path)
-
-        if not os.path.isfile(path):
-            continue
-
-        try:
-            relative_path = os.path.relpath(path, workspace)
-        except ValueError:
-            continue
-
-        # Never send paths outside the workspace.
-        if relative_path == os.pardir or relative_path.startswith(
-            os.pardir + os.sep
-        ):
-            continue
-
-        relative_path = relative_path.replace("\\", "/")
-
-        request_parts.append({
-            "name": os.path.basename(relative_path),
-            "relativePath": relative_path,
-        })
-
-        local_paths[relative_path] = path
-
-    if not request_parts:
-        return
-
-    url = server_url + "/plmJson/workspaceParts"
-    response = None
+    target = os.path.normcase(os.path.realpath(file_path))
 
     try:
-        FreeCAD.Console.PrintMessage(
-            "PLM: Looking up metadata for {} FreeCAD documents.\n".format(
-                len(request_parts)
-            )
-        )
+        documents = FreeCAD.listDocuments().values()
+    except Exception:
+        documents = []
 
-        response = session.post(
-            url,
-            json={"parts": request_parts},
-            timeout=60,
-        )
-        response.raise_for_status()
+    for doc in documents:
+        doc_path = getattr(doc, "FileName", "")
 
-        data = response.json()
+        if not doc_path:
+            continue
 
-        FreeCAD.Console.PrintMessage(
-            "PLM: Assembly inventory response:\n{}\n".format(
-                json.dumps(data, indent=2, default=str)
-            )
-        )
+        if os.path.normcase(os.path.realpath(doc_path)) != target:
+            continue
 
-        if not isinstance(data, dict):
-            return
+        if getattr(doc, "Modified", False):
+            return True
 
-        server_parts = data.get("parts", [])
-
-        if not isinstance(server_parts, list):
-            return
-
-        workspace_file = os.path.join(
-            workspace,
-            "workspace.json",
-        )
-
-        if os.path.isfile(workspace_file):
-            try:
-                with open(
-                    workspace_file, "r", encoding="utf-8"
-                ) as f:
-                    workspace_data = json.load(f)
-            except (json.JSONDecodeError, OSError):
-                workspace_data = {}
-        else:
-            workspace_data = {}
-
-        parts = workspace_data.setdefault("parts", {})
-
-        updated_count = 0
-
-        for item in server_parts:
-            if not isinstance(item, dict):
-                continue
-
-            part_id = item.get("plmPartId")
-
-            # Ignore files the server could not associate with a PLM part.
-            if part_id is None:
-                continue
-
-            relative_path = item.get("relativePath")
-
-            # Match the server response to the extracted local file.
-            local_path = None
-
-            if relative_path:
-                normalized = str(relative_path).replace("\\", "/")
-                local_path = local_paths.get(normalized)
-
-            # Some responses may omit relativePath. Fall back to name
-            # only when it uniquely identifies an extracted document.
-            if local_path is None:
-                returned_name = item.get("name")
-
-                if returned_name:
-                    matches = [
-                        path
-                        for rel, path in local_paths.items()
-                        if os.path.basename(rel) == os.path.basename(
-                            str(returned_name)
-                        )
-                    ]
-
-                    if len(matches) == 1:
-                        local_path = matches[0]
-
-            if local_path is None:
-                FreeCAD.Console.PrintWarning(
-                    "PLM: Could not match inventory entry for part "
-                    "{} to an extracted document.\n".format(part_id)
-                )
-                continue
-
-            version = item.get("latestVersion")
-
-            if version is None:
-                version = item.get("computedVersion")
-
-            if version is None:
-                version = item.get("version")
-
-            key = str(part_id)
-            existing = parts.get(key, {})
-
-            if not isinstance(existing, dict):
-                existing = {}
-
-            # Preserve a previously known version if the server does
-            # not provide one in this response.
-            if version is None:
-                version = existing.get("version")
-
-            parts[key] = {
-                "partId": part_id,
-                "name": (
-                    item.get("originalName")
-                    or existing.get("name")
-                    or os.path.basename(local_path)
-                ),
-                "version": version,
-                "file": os.path.relpath(
-                    local_path, workspace
-                ).replace("\\", "/"),
-            }
-
-            updated_count += 1
-
-            FreeCAD.Console.PrintMessage(
-                "PLM: Inventory updated: part {}, version {}, file {}\n".format(
-                    part_id,
-                    version,
-                    local_path,
-                )
-            )
-
-        # Write atomically to avoid corrupting workspace.json.
-        fd, temp_path = tempfile.mkstemp(
-            prefix="workspace_",
-            suffix=".json.tmp",
-            dir=workspace,
-        )
-
-        try:
-            with os.fdopen(fd, "w", encoding="utf-8") as f:
-                json.dump(workspace_data, f, indent=4)
-                f.write("\n")
-
-            os.replace(temp_path, workspace_file)
-
-        finally:
-            if os.path.exists(temp_path):
-                os.remove(temp_path)
-
-        FreeCAD.Console.PrintMessage(
-            "PLM: Updated metadata for {} PLM parts.\n".format(
-                updated_count
-            )
-        )
-
-    except Exception as exc:
-        FreeCAD.Console.PrintWarning(
-            "PLM: Failed to update assembly inventory: {}\n".format(
-                exc
-            )
-        )
-
-    finally:
-        if response is not None:
-            response.close()
+    return False

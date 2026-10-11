@@ -7,6 +7,7 @@
 
 import os
 import requests
+import sys
 
 import FreeCAD
 import FreeCADGui
@@ -22,6 +23,11 @@ ICON_DIR = os.path.join(
     "part-manager-plm_for_freecad",
     "icons"
 )
+
+MODULE_DIR = os.path.dirname(os.path.abspath(__file__))
+
+if MODULE_DIR not in sys.path:
+    sys.path.insert(0, MODULE_DIR)
 
 class BrowseByTagPanel:
 

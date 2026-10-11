@@ -12,13 +12,17 @@ Features:
 """
 
 import os
-import json
 import shutil
 import FreeCAD
 import FreeCADGui
 import Login
+import WorkspaceInventory
+import PlmDownload
+
 from PySide import QtGui
 from PySide import QtCore, QtGui, QtWidgets
+
+WORKSPACE_INVENTORY_ENDPOINT = "/plmJson/workspaceParts"
 
 ICON_DIR = os.path.join(
     FreeCAD.getUserAppDataDir(),
@@ -27,7 +31,6 @@ ICON_DIR = os.path.join(
     "icons"
 )
 
-WORKSPACE_INVENTORY_ENDPOINT = "/plmJson/workspaceParts"
 
 
 class WorkspacePanel:
@@ -52,6 +55,7 @@ class WorkspacePanel:
 
         self.build_ui()
         self.load_workspaces()
+        self.refresh_parts()
 
     # ---------------------------------------------------------
     # UI
@@ -62,78 +66,41 @@ class WorkspacePanel:
 
         # Workspace selection
         workspace_layout = QtWidgets.QHBoxLayout()
-
-        workspace_layout.addWidget(
-            QtWidgets.QLabel("Workspace:")
-        )
+        workspace_layout.addWidget(QtWidgets.QLabel("Workspace:"))
 
         self.workspace_combo = QtWidgets.QComboBox()
         self.workspace_combo.setMinimumWidth(250)
         self.workspace_combo.currentIndexChanged.connect(self.workspace_changed)
-
         workspace_layout.addWidget(self.workspace_combo, 1)
 
-        self.create_workspace_button = QtWidgets.QPushButton(
-            "Create Workspace"
-        )
-        self.create_workspace_button.clicked.connect(
-            self.create_workspace
-        )
-
-        workspace_layout.addWidget(
-            self.create_workspace_button
-        )
+        self.create_workspace_button = QtWidgets.QPushButton("Create Workspace")
+        self.create_workspace_button.clicked.connect(self.create_workspace)
+        workspace_layout.addWidget(self.create_workspace_button)
 
         layout.addLayout(workspace_layout)
 
         # Active workspace path
-        self.workspace_path_label = QtWidgets.QLabel(
-            "Workspace directory: Not selected"
-        )
+        self.workspace_path_label = QtWidgets.QLabel("Workspace directory: Not selected")
         self.workspace_path_label.setWordWrap(True)
-
         layout.addWidget(self.workspace_path_label)
 
-        # Workspace actions
+        # Workspace actions: Set Active Workspace and Refresh
         action_layout = QtWidgets.QHBoxLayout()
 
-        self.set_workspace_button = QtWidgets.QPushButton(
-            "Set as Active Workspace"
-        )
-        self.set_workspace_button.clicked.connect(
-            self.set_active_workspace
-        )
+        self.set_workspace_button = QtWidgets.QPushButton("Set as Active Workspace")
+        self.set_workspace_button.clicked.connect(self.set_active_workspace)
+        action_layout.addWidget(self.set_workspace_button)
 
-        action_layout.addWidget(
-            self.set_workspace_button
-        )
+        self.refresh_button = QtWidgets.QPushButton("Refresh")
+        self.refresh_button.clicked.connect(self.refresh_parts)
+        action_layout.addWidget(self.refresh_button)
 
-        self.refresh_button = QtWidgets.QPushButton(
-            "Refresh"
-        )
-        self.refresh_button.clicked.connect(
-            self.refresh_parts
-        )
-
-        action_layout.addWidget(
-            self.refresh_button
-        )
-        self.import_button = QtWidgets.QPushButton(
-            "Import to Workspace"
-        )
-        self.import_button.clicked.connect(
-            self.import_to_workspace
-        )
-
-        action_layout.addWidget(
-            self.import_button
-        )
+        action_layout.addStretch()
         layout.addLayout(action_layout)
 
         # Parts table
         self.parts_table = QtWidgets.QTableWidget()
         self.parts_table.setColumnCount(4)
-
         self.parts_table.setHorizontalHeaderLabels([
             "Local Part",
             "Local Version",
@@ -141,38 +108,48 @@ class WorkspacePanel:
             "PLM Status"
         ])
 
-        self.parts_table.setSelectionBehavior(
-            QtWidgets.QAbstractItemView.SelectRows
-        )
-
         self.parts_table.setSelectionMode(
-            QtWidgets.QAbstractItemView.SingleSelection
+            QtWidgets.QAbstractItemView.ExtendedSelection
         )
-
         self.parts_table.setEditTriggers(
             QtWidgets.QAbstractItemView.NoEditTriggers
         )
-
         self.parts_table.setAlternatingRowColors(True)
 
         header = self.parts_table.horizontalHeader()
-
         header.setSectionResizeMode(0, QtWidgets.QHeaderView.Stretch)
         header.setSectionResizeMode(1, QtWidgets.QHeaderView.ResizeToContents)
         header.setSectionResizeMode(2, QtWidgets.QHeaderView.ResizeToContents)
         header.setSectionResizeMode(3, QtWidgets.QHeaderView.ResizeToContents)
+
         layout.addWidget(self.parts_table, 1)
+
+        # Table actions: Import, Sync, and Remove from Workspace
+        table_action_layout = QtWidgets.QHBoxLayout()
+
+        self.import_button = QtWidgets.QPushButton("Import to Workspace")
+        self.import_button.clicked.connect(self.import_to_workspace)
+        table_action_layout.addWidget(self.import_button)
+
+        self.sync_button = QtWidgets.QPushButton("Sync with Server")
+        self.sync_button.clicked.connect(self.sync_with_server)
+        table_action_layout.addWidget(self.sync_button)
+
+        self.remove_workspace_button = QtWidgets.QPushButton("Remove from Workspace")
+        self.remove_workspace_button.clicked.connect(self.remove_from_workspace)
+        table_action_layout.addWidget(self.remove_workspace_button)
+
+        table_action_layout.addStretch()
+        layout.addLayout(table_action_layout)
 
         # Status
         self.status_label = QtWidgets.QLabel("")
         self.status_label.setWordWrap(True)
-
         layout.addWidget(self.status_label)
 
         # Close
         close_button = QtWidgets.QPushButton("Close")
         close_button.clicked.connect(self.dialog.close)
-
         layout.addWidget(close_button)
     # ---------------------------------------------------------
     # Import files into workspace
@@ -640,33 +617,517 @@ class WorkspacePanel:
             key=lambda value: value.lower()
         )
 
+    def sync_with_server(self):
+        """Download newer server versions of parts in the active workspace."""
+
+        from PySide import QtWidgets
+
+        workspace = getattr(self, "current_workspace", None)
+
+        if not workspace or not os.path.isdir(workspace):
+            QtWidgets.QMessageBox.warning(
+                self.dialog,
+                "Sync with Server",
+                "Please select a valid workspace first."
+            )
+            return
+
+        if not self.connection or not getattr(
+                self.connection, "connected", False
+        ):
+            QtWidgets.QMessageBox.warning(
+                self.dialog,
+                "Sync with Server",
+                "Please connect to the PLM server first."
+            )
+            return
+
+        workspace = os.path.abspath(workspace)
+
+        # Discover the local FreeCAD documents.
+        local_parts = self.find_local_parts()
+
+        if not local_parts:
+            QtWidgets.QMessageBox.information(
+                self.dialog,
+                "Sync with Server",
+                "No FreeCAD parts were found in the workspace."
+            )
+            return
+
+        # Obtain local and server metadata.
+        try:
+            local_inventory = self.get_local_inventory()
+            server_inventory = self.get_server_inventory(local_parts)
+
+        except Exception as exc:
+            QtWidgets.QMessageBox.critical(
+                self.dialog,
+                "Sync with Server",
+                "Could not retrieve workspace or server inventory:\n\n{}".format(
+                    exc
+                )
+            )
+            return
+
+        # Find parts whose server version is newer.
+        updates = []
+
+        for local_part in local_parts:
+            # Support the relative-path representation used by the inventory.
+            if isinstance(local_part, dict):
+                relative_path = (
+                        local_part.get("relativePath")
+                        or local_part.get("file")
+                        or local_part.get("path")
+                        or local_part.get("name")
+                )
+            else:
+                relative_path = str(local_part)
+
+            if not relative_path:
+                continue
+
+            relative_path = str(relative_path).replace("\\", "/")
+
+            local_path = os.path.abspath(
+                os.path.join(workspace, relative_path)
+            )
+
+            # Prevent paths outside the selected workspace.
+            if os.path.commonpath(
+                    [workspace, local_path]
+            ) != workspace:
+                continue
+
+            if not os.path.isfile(local_path):
+                continue
+
+            # Resolve local inventory metadata.
+            local_entry = (
+                    local_inventory.get(relative_path)
+                    or local_inventory.get(os.path.basename(relative_path))
+                    or {}
+            )
+
+            # Resolve server inventory metadata.
+            server_entry = (
+                    server_inventory.get(relative_path)
+                    or server_inventory.get(os.path.basename(relative_path))
+                    or {}
+            )
+
+            local_version = local_entry.get("version")
+            server_version = server_entry.get("version")
+
+            if not server_entry.get("exists", False):
+                continue
+
+            if not self.server_version_is_newer(
+                    local_version,
+                    server_version
+            ):
+                continue
+
+            part_id = server_entry.get("plmPartId")
+
+            if part_id is None:
+                continue
+
+            # Use the server record as the download metadata.
+            server_part_data = dict(
+                server_entry.get("part") or {}
+            )
+
+            server_part_data["latestVersion"] = server_version
+            server_part_data["version"] = server_version
+
+            updates.append({
+                "path": local_path,
+                "relative_path": relative_path,
+                "part_id": part_id,
+                "local_version": local_version,
+                "server_version": server_version,
+                "part_data": server_part_data,
+            })
+
+        if not updates:
+            QtWidgets.QMessageBox.information(
+                self.dialog,
+                "Sync with Server",
+                "All workspace parts are up to date."
+            )
+            return
+
+        # Confirm the changes before replacing files.
+        details = "\n".join(
+            "{}: {} → {}".format(
+                item["relative_path"],
+                item["local_version"] or "Unknown",
+                item["server_version"] or "Unknown",
+            )
+            for item in updates
+        )
+
+        answer = QtWidgets.QMessageBox.question(
+            self.dialog,
+            "Sync with Server",
+            "The following parts have newer server versions:\n\n"
+            "{}\n\nDownload and replace these local files?".format(details),
+            QtWidgets.QMessageBox.Yes | QtWidgets.QMessageBox.No,
+            QtWidgets.QMessageBox.No,
+        )
+
+        if answer != QtWidgets.QMessageBox.Yes:
+            return
+
+        downloaded = 0
+        skipped = 0
+        failed = 0
+        messages = []
+
+        # Disable the button while synchronization is running.
+        self.sync_button.setEnabled(False)
+
+        try:
+            for item in updates:
+                path = item["path"]
+
+                # Skip the main document if it is open and modified.
+                modified_open_document = False
+
+                for doc in FreeCAD.listDocuments().values():
+                    doc_path = getattr(doc, "FileName", "")
+
+                    if not doc_path:
+                        continue
+
+                    if (
+                            os.path.normcase(os.path.realpath(doc_path))
+                            == os.path.normcase(os.path.realpath(path))
+                            and getattr(doc, "Modified", False)
+                    ):
+                        modified_open_document = True
+                        break
+
+                if modified_open_document:
+                    skipped += 1
+                    messages.append(
+                        "Skipped {}: open with unsaved changes.".format(
+                            item["relative_path"]
+                        )
+                    )
+                    continue
+
+                try:
+                    result = PlmDownload.download_part(
+                        connection=self.connection,
+                        part_id=item["part_id"],
+                        part_data=item["part_data"],
+                        workspace=workspace,
+                        force=True,
+                        destination_path=path,
+                    )
+
+                    if result and os.path.isfile(result):
+                        downloaded += 1
+                    else:
+                        failed += 1
+                        messages.append(
+                            "Failed to update {}.".format(
+                                item["relative_path"]
+                            )
+                        )
+
+                except Exception as exc:
+                    failed += 1
+                    messages.append(
+                        "Failed to update {}: {}".format(
+                            item["relative_path"],
+                            exc
+                        )
+                    )
+
+        finally:
+            self.sync_button.setEnabled(True)
+
+        # Refresh the table to display the latest inventory and versions.
+        self.refresh_parts()
+
+        summary = (
+            "Synchronization finished.\n\n"
+            "Updated: {}\n"
+            "Skipped: {}\n"
+            "Failed: {}".format(downloaded, skipped, failed)
+        )
+
+        if messages:
+            summary += "\n\nDetails:\n" + "\n".join(messages)
+
+        if failed:
+            QtWidgets.QMessageBox.warning(
+                self.dialog,
+                "Sync with Server",
+                summary
+            )
+        else:
+            QtWidgets.QMessageBox.information(
+                self.dialog,
+                "Sync with Server",
+                summary
+            )
+    # ---------------------------------------------------------
+    # Remove parts from workspace
+    # ---------------------------------------------------------
+
+    # ---------------------------------------------------------
+    # Remove parts from workspace
+    # ---------------------------------------------------------
+
+    def remove_from_workspace(self):
+        """Remove selected local FreeCAD documents from the workspace.
+
+        Deletes local files and removes their corresponding entries
+        from workspace.json. Does not delete parts from the PLM server.
+        """
+
+        workspace = self.current_workspace
+
+        if not workspace or not os.path.isdir(workspace):
+            self.show_error("Please select a valid workspace first.")
+            return
+
+        workspace_root = os.path.realpath(workspace)
+
+        # Get selected row numbers.
+        selected_rows = sorted({
+            index.row()
+            for index in self.parts_table.selectionModel().selectedRows()
+        })
+
+        if not selected_rows:
+            self.show_error(
+                "Please select one or more parts to remove."
+            )
+            return
+
+        # Collect selected files and their relative paths.
+        files_to_remove = []
+
+        for row in selected_rows:
+            item = self.parts_table.item(row, 0)
+
+            if item is None:
+                continue
+
+            relative_path = item.text().replace("\\", "/")
+
+            file_path = os.path.realpath(
+                os.path.join(workspace_root, relative_path)
+            )
+
+            try:
+                if os.path.commonpath(
+                    [workspace_root, file_path]
+                ) != workspace_root:
+                    self.show_error(
+                        "Invalid workspace file path:\n{}".format(
+                            relative_path
+                        )
+                    )
+                    return
+
+            except ValueError:
+                self.show_error(
+                    "Invalid workspace file path:\n{}".format(
+                        relative_path
+                    )
+                )
+                return
+
+            if not os.path.isfile(file_path):
+                continue
+
+            files_to_remove.append({
+                "relative_path": relative_path,
+                "file_path": file_path
+            })
+
+        if not files_to_remove:
+            self.show_error(
+                "None of the selected files exists in the workspace."
+            )
+            self.refresh_parts()
+            return
+
+        # Confirm before deleting files.
+        filenames = [
+            entry["relative_path"]
+            for entry in files_to_remove
+        ]
+
+        answer = QtWidgets.QMessageBox.question(
+            self.dialog,
+            "Remove from Workspace",
+            "Remove the following {} file(s) from the workspace?\n\n"
+            "{}\n\n"
+            "The local files and their workspace inventory entries "
+            "will be removed. The PLM server will not be modified."
+            .format(
+                len(files_to_remove),
+                "\n".join(filenames)
+            ),
+            QtWidgets.QMessageBox.Yes | QtWidgets.QMessageBox.No,
+            QtWidgets.QMessageBox.No
+        )
+
+        if answer != QtWidgets.QMessageBox.Yes:
+            return
+
+        removed_count = 0
+        inventory_count = 0
+        errors = []
+
+        # Read workspace.json before deleting anything.
+        try:
+            inventory = WorkspaceInventory.get_workspace_inventory(
+                workspace
+            )
+
+            parts = inventory.get("parts", {})
+
+            if not isinstance(parts, dict):
+                raise ValueError(
+                    "The 'parts' field in workspace.json is invalid."
+                )
+
+        except Exception as exc:
+            self.show_error(
+                "Could not read workspace.json:\n{}".format(exc)
+            )
+            return
+
+        # Build a map from normalized relative paths to part IDs.
+        path_to_part_id = {}
+
+        for inventory_id, part_data in parts.items():
+            if not isinstance(part_data, dict):
+                continue
+
+            inventory_file = str(
+                part_data.get("file") or ""
+            ).replace("\\", "/")
+
+            if inventory_file:
+                normalized_path = os.path.normcase(
+                    os.path.normpath(inventory_file)
+                )
+
+                path_to_part_id[normalized_path] = inventory_id
+
+        # Delete files and remove corresponding inventory entries.
+        for entry in files_to_remove:
+            relative_path = entry["relative_path"]
+            file_path = entry["file_path"]
+
+            normalized_path = os.path.normcase(
+                os.path.normpath(relative_path)
+            )
+
+            part_id = path_to_part_id.get(normalized_path)
+
+            try:
+                os.remove(file_path)
+                removed_count += 1
+
+                if part_id is not None:
+                    WorkspaceInventory.remove_workspace_part(
+                        workspace,
+                        part_id
+                    )
+
+                    inventory_count += 1
+
+                    # Avoid attempting to remove the same entry twice.
+                    path_to_part_id.pop(normalized_path, None)
+
+                    FreeCAD.Console.PrintMessage(
+                        "PLM: Removed part {} from workspace.json.\n"
+                        .format(part_id)
+                    )
+
+                else:
+                    FreeCAD.Console.PrintWarning(
+                        "PLM: Deleted {}, but no matching part ID "
+                        "was found in workspace.json.\n".format(
+                            relative_path
+                        )
+                    )
+
+            except Exception as exc:
+                errors.append(
+                    "{}: {}".format(relative_path, exc)
+                )
+
+        # Refresh the table.
+        self.refresh_parts()
+
+        summary = (
+            "Removed {} local file(s).\n"
+            "Removed {} inventory entr(y/ies) from workspace.json."
+            .format(
+                removed_count,
+                inventory_count
+            )
+        )
+
+        if errors:
+            summary += "\n\nErrors:\n" + "\n".join(errors)
+
+            QtWidgets.QMessageBox.warning(
+                self.dialog,
+                "Remove from Workspace",
+                summary
+            )
+        else:
+            self.status_label.setText(summary)
+
+        FreeCAD.Console.PrintMessage(
+            "PLM: {}\n".format(summary.replace("\n", " "))
+        )
     # ---------------------------------------------------------
     # Local workspace inventory
     # ---------------------------------------------------------
 
     def get_local_inventory(self):
         """
-        Read locally recorded PLM part versions from workspace.json.
+        Read local PLM part versions using WorkspaceInventory.
 
-        Returns a dictionary indexed by relative path and filename.
+        Returns a dictionary indexed by normalized relative path
+        and filename.
         """
 
-        workspace_file = os.path.join(
-            self.current_workspace,
-            "workspace.json"
-        )
-
-        if not os.path.isfile(workspace_file):
+        if (
+            not self.current_workspace
+            or not os.path.isdir(self.current_workspace)
+        ):
             return {}
 
         try:
-            with open(workspace_file, "r", encoding="utf-8") as f:
-                workspace_data = json.load(f)
-
-        except (json.JSONDecodeError, OSError) as exc:
-            FreeCAD.Console.PrintWarning(
-                "PLM: Could not read workspace.json: {}\n".format(exc)
+            # WorkspaceInventory owns workspace.json access.
+            workspace_data = WorkspaceInventory.get_workspace_inventory(
+                self.current_workspace
             )
+
+        except Exception as exc:
+            FreeCAD.Console.PrintWarning(
+                "PLM: Could not read workspace inventory: {}\n".format(
+                    exc
+                )
+            )
+            return {}
+
+        if not isinstance(workspace_data, dict):
             return {}
 
         parts = workspace_data.get("parts", {})
@@ -679,7 +1140,9 @@ class WorkspacePanel:
             if not isinstance(part, dict):
                 continue
 
-            filename = str(part.get("file") or "").replace("\\", "/")
+            filename = str(
+                part.get("file") or ""
+            ).replace("\\", "/")
 
             if not filename:
                 continue
@@ -697,13 +1160,11 @@ class WorkspacePanel:
                 "name": part.get("name", ""),
             }
 
-            # Index by relative path.
+            # Index by normalized relative path.
             inventory[filename.lower()] = entry
 
-            # Also index by filename for compatibility with entries
-            # saved before relative paths were used.
+            # Also index by filename for older inventory entries.
             basename = os.path.basename(filename).lower()
-
             inventory.setdefault(basename, entry)
 
         return inventory
@@ -933,6 +1394,9 @@ class WorkspacePanel:
             )
             version_text = "Unknown"
 
+            version_text = "Unknown"
+            server_part = None
+
             if inventory is not None:
                 normalized_path = (
                     relative_path.replace("\\", "/").lower()
@@ -942,16 +1406,13 @@ class WorkspacePanel:
                     relative_path
                 ).lower()
 
-                server_part = inventory.get(
-                    normalized_path
-                )
+                server_part = inventory.get(normalized_path)
 
                 if server_part is None:
                     server_part = inventory.get(filename)
 
                 if server_part is None:
                     version_text = "Not in PLM"
-
                 else:
                     version_text = server_part["version"]
 
