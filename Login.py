@@ -177,6 +177,15 @@ class LoginPanel:
 
         self.update_connection_status()
 
+        # Press Enter in the password field to connect.
+        self.form.passEdit.returnPressed.connect(self.login)
+
+        # Focus the password field when the dialog opens.
+        QtCore.QTimer.singleShot(
+            0,
+            self.form.passEdit.setFocus
+        )
+
     def login(self):
         username = self.form.userEdit.text().strip()
         password = self.form.passEdit.text()
@@ -194,6 +203,19 @@ class LoginPanel:
 
         if success:
             self.refresh_server_info()
+
+            # Automatically close the login dialog
+            # 2 seconds after successful connection.
+            QtCore.QTimer.singleShot(
+                2000,
+                self.close_after_login
+            )
+
+        else:
+            # Keep the window open and return focus
+            # to the password field if login fails.
+            self.form.passEdit.clear()
+            self.form.passEdit.setFocus()
 
     def logout(self):
         self.connection.logout()
@@ -218,6 +240,14 @@ class LoginPanel:
         else:
             self.form.connectButton.setText("Connect")
             self.form.connectButton.setStyleSheet("")
+
+    def close_after_login(self):
+        """Close the login dialog after successful authentication."""
+
+        global _dialog
+
+        if self.connection.connected and _dialog is not None:
+            _dialog.accept()
 
     def refresh_server_info(self):
         info = self.connection.get_server_info()
@@ -271,6 +301,13 @@ def show_login_dialog():
         _dialog.show()
         _dialog.raise_()
         _dialog.activateWindow()
+
+        # Focus password field.
+        if _login_panel is not None:
+            QtCore.QTimer.singleShot(
+                0,
+                _login_panel.form.passEdit.setFocus
+            )
         return
 
     _dialog = QtWidgets.QDialog()
@@ -285,6 +322,14 @@ def show_login_dialog():
     _dialog.finished.connect(_on_dialog_finished)
 
     _dialog.show()
+    _dialog.raise_()
+    _dialog.activateWindow()
+
+    # Automatically focus password field.
+    QtCore.QTimer.singleShot(
+        0,
+        _login_panel.form.passEdit.setFocus
+    )
 
 
 def _on_dialog_finished(result):
@@ -309,15 +354,6 @@ class CommandPMPLMLogin:
             "MenuText": "Login",
             "ToolTip": "Connect to the Parts Manager PLM server"
         }
-
-    def IsActive(self):
-        return True
-
-    def Activated(self):
-        # Keep your existing login dialog implementation here.
-        pass
-
-
 
     def IsActive(self):
         return True
