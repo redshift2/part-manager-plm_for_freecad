@@ -337,7 +337,28 @@ def save_workspace_inventory(
         response.raise_for_status()
 
         data = response.json()
+        #---------------debug------------------------
+        FreeCAD.Console.PrintMessage(
+            "\n===== PLM WORKSPACE SERVER RESPONSE =====\n"
+        )
 
+        FreeCAD.Console.PrintMessage(
+            "HTTP status: {}\n".format(
+                response.status_code
+            )
+        )
+
+        FreeCAD.Console.PrintMessage(
+            "Server response:\n{}\n".format(
+                json.dumps(data, indent=2)
+            )
+        )
+
+        FreeCAD.Console.PrintMessage(
+            "=========================================\n"
+        )
+
+        #----end debug--------------------------------
         if not isinstance(data, dict):
             return
 

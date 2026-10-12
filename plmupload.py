@@ -29,7 +29,7 @@ import requests
 import freecad_plm_pb2 as PlmBuf
 
 from Login import get_connection
-
+from WorkspaceInventory import save_workspace_inventory
 
 class PlmUploadError(Exception):
     """Raised when a PLM upload fails."""
@@ -737,7 +737,139 @@ class PlmUploader:
             )
 
         return bucket
+    # ------------------------------------------------------------
+    #Updated the workspace json file
+    # ------------------------------------------------------------
+    def update_workspace_inventory(self, documents):
+        """
+        Update workspace.json after a successful PLM upload.
+        """
 
+        import os
+        from PySide import QtCore
+        from WorkspaceInventory import (
+            save_workspace_inventory,
+            get_workspace_inventory
+        )
+
+        settings = QtCore.QSettings(
+            QtCore.QSettings.IniFormat,
+            QtCore.QSettings.UserScope,
+            "PMPLM",
+            "PartsManager"
+        )
+
+        settings.sync()
+
+        workspace = settings.value("workspace", "")
+
+        FreeCAD.Console.PrintMessage(
+            "PLM Upload: Active workspace = {}\n".format(
+                workspace
+            )
+        )
+
+        FreeCAD.Console.PrintMessage(
+            "\n===== PLM WORKSPACE INVENTORY UPDATE =====\n"
+        )
+
+        FreeCAD.Console.PrintMessage(
+            "Workspace from settings: {}\n".format(workspace)
+        )
+
+        if not workspace:
+            FreeCAD.Console.PrintWarning(
+                "PLM: No workspace configured.\n"
+            )
+            return
+
+        workspace = os.path.abspath(
+            os.path.expanduser(str(workspace))
+        )
+
+        if not os.path.isdir(workspace):
+            FreeCAD.Console.PrintWarning(
+                "PLM: Workspace does not exist: {}\n".format(
+                    workspace
+                )
+            )
+            return
+
+        fcstd_paths = []
+
+        for doc in documents:
+
+            filename = getattr(doc, "FileName", "")
+
+            FreeCAD.Console.PrintMessage(
+                "Uploaded document: {}\n".format(filename)
+            )
+
+            if not filename:
+                continue
+
+            filename = os.path.abspath(filename)
+
+            if not os.path.isfile(filename):
+                FreeCAD.Console.PrintWarning(
+                    "PLM: File does not exist: {}\n".format(
+                        filename
+                    )
+                )
+                continue
+
+            if os.path.commonpath(
+                [workspace, filename]
+            ) != workspace:
+
+                FreeCAD.Console.PrintWarning(
+                    "PLM: File outside workspace: {}\n".format(
+                        filename
+                    )
+                )
+                continue
+
+            fcstd_paths.append(filename)
+
+        FreeCAD.Console.PrintMessage(
+            "Files selected for inventory update: {}\n".format(
+                len(fcstd_paths)
+            )
+        )
+
+        if not fcstd_paths:
+            FreeCAD.Console.PrintWarning(
+                "PLM: No files available for inventory update.\n"
+            )
+            return
+
+        # Retrieve inventory before update.
+        before = get_workspace_inventory(workspace)
+
+        FreeCAD.Console.PrintMessage(
+            "Inventory before update:\n{}\n".format(
+                json.dumps(before, indent=2)
+            )
+        )
+
+        save_workspace_inventory(
+            connection=self.connection,
+            workspace=workspace,
+            fcstd_paths=fcstd_paths
+        )
+
+        # Retrieve inventory after update.
+        after = get_workspace_inventory(workspace)
+
+        FreeCAD.Console.PrintMessage(
+            "Inventory after update:\n{}\n".format(
+                json.dumps(after, indent=2)
+            )
+        )
+
+        FreeCAD.Console.PrintMessage(
+            "==========================================\n"
+        )
     # ------------------------------------------------------------
     # Main upload
     # ------------------------------------------------------------
@@ -925,6 +1057,18 @@ class PlmUploader:
             self._record_modified_baseline(
                 active_doc,
                 documents,
+            )
+
+        # Update workspace.json with the new server versions.
+        try:
+            self.update_workspace_inventory(documents)
+
+        except Exception as exc:
+            FreeCAD.Console.PrintWarning(
+                "PLM: Upload succeeded, but workspace "
+                "inventory update failed: {}\n".format(
+                    exc
+                )
             )
 
         if progress_callback:
