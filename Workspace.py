@@ -18,6 +18,7 @@ import FreeCADGui
 import Login
 import WorkspaceInventory
 import PlmDownload
+import PlmTags
 
 from PySide import QtGui
 from PySide import QtCore, QtGui, QtWidgets
@@ -144,6 +145,31 @@ class WorkspacePanel:
         self.remove_workspace_button.clicked.connect(self.remove_from_workspace)
         table_action_layout.addWidget(self.remove_workspace_button)
 
+        # Open selected workspace parts in FreeCAD.
+        self.open_freecad_button = QtWidgets.QPushButton(
+            "Open in FreeCAD"
+        )
+
+        self.open_freecad_button.clicked.connect(
+            self.open_in_freecad
+        )
+
+        table_action_layout.addWidget(
+            self.open_freecad_button
+        )
+
+        # Check selected workspace parts into PLM.
+        self.checkin_button = QtWidgets.QPushButton(
+            "Check-In to PLM"
+        )
+
+        self.checkin_button.clicked.connect(
+            self.check_in_to_plm
+        )
+
+        table_action_layout.addWidget(
+            self.checkin_button
+        )
         table_action_layout.addStretch()
         layout.addLayout(table_action_layout)
 
@@ -156,6 +182,827 @@ class WorkspacePanel:
         close_button = QtWidgets.QPushButton("Close")
         close_button.clicked.connect(self.dialog.close)
         layout.addWidget(close_button)
+
+    # ---------------------------------------------------------
+    # Select PLM tags using hierarchical tree
+    # ---------------------------------------------------------
+
+    def select_plm_tags(self):
+        """
+        Display PLM tags in a hierarchical tree.
+
+        Features:
+        - Parent/child tag hierarchy.
+        - Expand and collapse categories.
+        - Multiple tag selection.
+        - Independent checkboxes.
+        - Returns selected tag IDs.
+        """
+
+        import PlmTags
+
+        try:
+            tags = PlmTags.get_tags(self.connection)
+
+        except Exception as exc:
+            self.show_error(
+                "Could not retrieve PLM tags:\n{}".format(exc)
+            )
+            return None
+
+        dialog = QtWidgets.QDialog(self.dialog)
+        dialog.setWindowTitle("Select PLM Tags")
+        dialog.resize(450, 550)
+
+        layout = QtWidgets.QVBoxLayout(dialog)
+
+        layout.addWidget(
+            QtWidgets.QLabel(
+                "Select tags to assign to the uploaded parts:"
+            )
+        )
+
+        # -----------------------------------------------------
+        # Hierarchical tag tree
+        # -----------------------------------------------------
+
+        tag_tree = QtWidgets.QTreeWidget()
+
+        tag_tree.setHeaderLabels(["PLM Tags"])
+        tag_tree.setSelectionMode(
+            QtWidgets.QAbstractItemView.NoSelection
+        )
+
+        tag_tree.setAlternatingRowColors(True)
+
+        layout.addWidget(tag_tree)
+
+        # -----------------------------------------------------
+        # Create tag items
+        # -----------------------------------------------------
+
+        tag_items = {}
+        tag_items_by_name = {}
+
+        for tag in tags:
+
+            tag_id = tag.get("id")
+            tag_name = str(tag.get("name", "")).strip()
+
+            if tag_id is None or not tag_name:
+                continue
+
+            tag_id = str(tag_id)
+
+            item = QtWidgets.QTreeWidgetItem()
+
+            item.setText(0, tag_name)
+
+            item.setData(
+                0,
+                QtCore.Qt.UserRole,
+                int(tag_id)
+            )
+
+            item.setFlags(
+                item.flags()
+                | QtCore.Qt.ItemIsUserCheckable
+            )
+
+            item.setCheckState(
+                0,
+                QtCore.Qt.Unchecked
+            )
+
+            # Store by ID for collecting selected tags.
+            tag_items[tag_id] = item
+
+            # Store by name for resolving parent relationships.
+            tag_items_by_name[tag_name] = item
+
+        # -----------------------------------------------------
+        # Build parent-child hierarchy using parent NAME
+        # -----------------------------------------------------
+
+        for tag in tags:
+
+            tag_id = tag.get("id")
+
+            if tag_id is None:
+                continue
+
+            item = tag_items.get(str(tag_id))
+
+            if item is None:
+                continue
+
+            # Parent is a tag name, not an ID.
+            parent_name = tag.get("parent")
+
+            if parent_name is not None:
+                parent_name = str(parent_name).strip()
+
+            parent_item = tag_items_by_name.get(parent_name)
+
+            if parent_item is not None and parent_item is not item:
+
+                parent_item.addChild(item)
+
+                FreeCAD.Console.PrintMessage(
+                    "PLM Tag: {} -> {}\n".format(
+                        parent_item.text(0),
+                        item.text(0)
+                    )
+                )
+
+            else:
+
+                tag_tree.addTopLevelItem(item)
+
+                FreeCAD.Console.PrintMessage(
+                    "PLM Root Tag: {}\n".format(
+                        item.text(0)
+                    )
+                )
+
+ 
+
+        # -----------------------------------------------------
+        # Expand tree
+        # -----------------------------------------------------
+
+        tag_tree.expandToDepth(1)
+
+        tag_tree.resizeColumnToContents(0)
+
+        # -----------------------------------------------------
+        # Expand / Collapse buttons
+        # -----------------------------------------------------
+
+        tree_buttons = QtWidgets.QHBoxLayout()
+
+        expand_button = QtWidgets.QPushButton(
+            "Expand All"
+        )
+
+        expand_button.clicked.connect(
+            tag_tree.expandAll
+        )
+
+        tree_buttons.addWidget(expand_button)
+
+        collapse_button = QtWidgets.QPushButton(
+            "Collapse All"
+        )
+
+        collapse_button.clicked.connect(
+            tag_tree.collapseAll
+        )
+
+        tree_buttons.addWidget(collapse_button)
+
+        tree_buttons.addStretch()
+
+        layout.addLayout(tree_buttons)
+
+        # -----------------------------------------------------
+        # OK / Cancel
+        # -----------------------------------------------------
+
+        buttons = QtWidgets.QDialogButtonBox(
+            QtWidgets.QDialogButtonBox.Ok
+            | QtWidgets.QDialogButtonBox.Cancel
+        )
+
+        buttons.accepted.connect(dialog.accept)
+        buttons.rejected.connect(dialog.reject)
+
+        layout.addWidget(buttons)
+
+        if dialog.exec_() != QtWidgets.QDialog.Accepted:
+            return None
+
+        # -----------------------------------------------------
+        # Collect checked tags
+        # -----------------------------------------------------
+
+        selected_tag_ids = []
+
+        for item in tag_items.values():
+
+            if item.checkState(0) == QtCore.Qt.Checked:
+
+                tag_id = item.data(
+                    0,
+                    QtCore.Qt.UserRole
+                )
+
+                selected_tag_ids.append(
+                    int(tag_id)
+                )
+
+        return selected_tag_ids
+
+    # ---------------------------------------------------------
+    # Check selected workspace parts into PLM
+    # ---------------------------------------------------------
+
+    def check_in_to_plm(self):
+        """
+        Upload selected workspace parts using plmupload.py.
+
+        Features:
+        - Supports multiple selected files.
+        - Opens documents if necessary.
+        - Reuses already open documents.
+        - Prompts to save modified documents.
+        - Uses plmupload.PlmUploader.
+        - Refreshes workspace inventory after upload.
+        """
+
+        import plmupload
+
+        # Verify PLM connection.
+        self.connection = Login.get_connection()
+
+        if not self.connection or not self.connection.connected:
+            self.show_error(
+                "Please connect to the PLM server first."
+            )
+            return
+
+        # Verify workspace.
+        workspace = self.current_workspace
+
+        if not workspace or not os.path.isdir(workspace):
+            self.show_error(
+                "Please select a valid workspace first."
+            )
+            return
+
+        workspace = os.path.realpath(workspace)
+
+        # Get selected rows.
+        selected_rows = sorted({
+            index.row()
+            for index in self.parts_table.selectionModel().selectedRows()
+        })
+
+        if not selected_rows:
+            self.show_error(
+                "Please select one or more parts to check in."
+            )
+            return
+
+        documents = []
+        errors = []
+        seen_paths = set()
+
+        # -----------------------------------------------------
+        # Collect selected FreeCAD documents
+        # -----------------------------------------------------
+
+        for row in selected_rows:
+
+            item = self.parts_table.item(row, 0)
+
+            if item is None:
+                continue
+
+            relative_path = item.text()
+
+            file_path = os.path.realpath(
+                os.path.join(
+                    workspace,
+                    relative_path
+                )
+            )
+
+            # Validate workspace path.
+            try:
+                if os.path.commonpath(
+                    [workspace, file_path]
+                ) != workspace:
+
+                    errors.append(
+                        "Invalid workspace path: {}".format(
+                            relative_path
+                        )
+                    )
+                    continue
+
+            except ValueError:
+                errors.append(
+                    "Invalid workspace path: {}".format(
+                        relative_path
+                    )
+                )
+                continue
+
+            if not os.path.isfile(file_path):
+                errors.append(
+                    "File not found: {}".format(
+                        relative_path
+                    )
+                )
+                continue
+
+            if not file_path.lower().endswith(".fcstd"):
+                errors.append(
+                    "Not a FreeCAD document: {}".format(
+                        relative_path
+                    )
+                )
+                continue
+
+            if file_path in seen_paths:
+                continue
+
+            seen_paths.add(file_path)
+
+            try:
+                # Find document if already open.
+                doc = None
+
+                for existing_doc in FreeCAD.listDocuments().values():
+
+                    existing_path = getattr(
+                        existing_doc,
+                        "FileName",
+                        ""
+                    )
+
+                    if not existing_path:
+                        continue
+
+                    if os.path.realpath(existing_path) == file_path:
+                        doc = existing_doc
+                        break
+
+                # Open document if not already open.
+                if doc is None:
+
+                    FreeCAD.Console.PrintMessage(
+                        "PLM: Opening for check-in: {}\n".format(
+                            file_path
+                        )
+                    )
+
+                    doc = FreeCAD.openDocument(file_path)
+
+                if doc is None:
+                    raise RuntimeError(
+                        "Could not open FreeCAD document."
+                    )
+
+                documents.append(doc)
+
+            except Exception as exc:
+
+                errors.append(
+                    "{}: {}".format(
+                        relative_path,
+                        exc
+                    )
+                )
+
+        # -----------------------------------------------------
+        # Verify documents
+        # -----------------------------------------------------
+
+        if errors:
+            QtWidgets.QMessageBox.warning(
+                self.dialog,
+                "Check-In to PLM",
+                "Some documents could not be prepared:\n\n"
+                + "\n".join(errors)
+                + "\n\nNo files have been uploaded."
+            )
+            return
+
+        if not documents:
+            self.show_error(
+                "No valid documents were selected for check-in."
+            )
+            return
+
+        # -----------------------------------------------------
+        # Save modified documents
+        # -----------------------------------------------------
+
+        modified_documents = [
+            doc for doc in documents
+            if getattr(doc, "Modified", False)
+        ]
+
+        if modified_documents:
+
+            names = "\n".join(
+                doc.Label for doc in modified_documents
+            )
+
+            answer = QtWidgets.QMessageBox.question(
+                self.dialog,
+                "Save Documents",
+                "The following documents have unsaved changes:\n\n"
+                "{}\n\n"
+                "Save these documents before check-in?".format(
+                    names
+                ),
+                QtWidgets.QMessageBox.Yes
+                | QtWidgets.QMessageBox.Cancel,
+                QtWidgets.QMessageBox.Yes
+            )
+
+            if answer != QtWidgets.QMessageBox.Yes:
+                return
+
+            try:
+                for doc in modified_documents:
+                    doc.save()
+
+            except Exception as exc:
+                self.show_error(
+                    "Could not save document:\n{}".format(exc)
+                )
+                return
+
+        # -----------------------------------------------------
+        # Confirm check-in
+        # -----------------------------------------------------
+
+        names = "\n".join(
+            doc.Label for doc in documents
+        )
+
+        answer = QtWidgets.QMessageBox.question(
+            self.dialog,
+            "Check-In to PLM",
+            "Check in the following {} document(s)?\n\n"
+            "{}".format(
+                len(documents),
+                names
+            ),
+            QtWidgets.QMessageBox.Yes
+            | QtWidgets.QMessageBox.No,
+            QtWidgets.QMessageBox.No
+        )
+
+        if answer != QtWidgets.QMessageBox.Yes:
+            return
+
+        # -----------------------------------------------------
+        # Upload using plmupload.py
+        # -----------------------------------------------------
+
+        self.checkin_button.setEnabled(False)
+
+        self.status_label.setText(
+            "Uploading {} document(s) to PLM...".format(
+                len(documents)
+            )
+        )
+
+        QtWidgets.QApplication.processEvents()
+
+
+        try:
+            FreeCAD.Console.PrintMessage(
+                "PLM: Starting workspace check-in.\n"
+            )
+            tag_ids = self.select_plm_tags()
+
+            if tag_ids is None:
+                return
+
+            uploader = plmupload.PlmUploader(
+                connection=self.connection,
+                documents=documents
+            )
+
+            result = uploader.upload_documents(
+                documents=documents
+            )
+
+            if result is False:
+                raise RuntimeError(
+                    "The PLM upload did not complete successfully."
+                )
+
+            FreeCAD.Console.PrintMessage(
+                "PLM: Workspace check-in completed.\n"
+            )
+
+            # Refresh local and server version information.
+            self.refresh_parts()
+
+            self.status_label.setText(
+                "Check-in complete: {} document(s).".format(
+                    len(documents)
+                )
+            )
+
+            QtWidgets.QMessageBox.information(
+                self.dialog,
+                "Check-In to PLM",
+                "Successfully checked in {} document(s).".format(
+                    len(documents)
+                )
+            )
+            # Retrieve server inventory after upload.
+            relative_paths = []
+
+            for doc in documents:
+
+                filename = getattr(doc, "FileName", "")
+
+                if not filename:
+                    continue
+
+                relative_path = os.path.relpath(
+                    filename,
+                    self.current_workspace
+                )
+
+                relative_paths.append(relative_path)
+
+            server_inventory = self.get_server_inventory(
+                relative_paths
+            )
+
+            tag_errors = []
+
+            for relative_path in relative_paths:
+
+                key = relative_path.replace("\\", "/").lower()
+
+                server_part = server_inventory.get(key)
+
+                if server_part is None:
+                    tag_errors.append(
+                        "{}: Part not found on server".format(relative_path)
+                    )
+                    continue
+
+                part_id = server_part.get("plmPartId")
+
+                if part_id is None:
+                    tag_errors.append(
+                        "{}: Missing PLM part ID".format(relative_path)
+                    )
+                    continue
+
+                try:
+                    PlmTags.set_part_tags(
+                        part_id=part_id,
+                        tag_ids=tag_ids,
+                        connection=self.connection
+                    )
+
+                    FreeCAD.Console.PrintMessage(
+                        "PLM: Assigned tags {} to part {}\n".format(
+                            tag_ids,
+                            part_id
+                        )
+                    )
+
+                except Exception as exc:
+                    tag_errors.append(
+                        "{}: {}".format(relative_path, exc)
+                    )
+
+            if tag_errors:
+                QtWidgets.QMessageBox.warning(
+                    self.dialog,
+                    "PLM Tag Assignment",
+                    "The upload completed, but some tags could not "
+                    "be assigned:\n\n"
+                    + "\n".join(tag_errors)
+                )
+        except Exception as exc:
+
+            FreeCAD.Console.PrintError(
+                "PLM: Workspace check-in failed: {}\n".format(
+                    exc
+                )
+            )
+
+            self.show_error(
+                "Check-in failed:\n\n{}".format(exc)
+            )
+
+        finally:
+            self.checkin_button.setEnabled(True)
+    # ---------------------------------------------------------
+    # Open selected parts in FreeCAD
+    # ---------------------------------------------------------
+
+    def open_in_freecad(self):
+        """
+        Open selected workspace parts in FreeCAD.
+
+        Features:
+        - Supports multiple selected files.
+        - Opens local FCStd files.
+        - Reuses documents already open in FreeCAD.
+        - Supports workspace subdirectories.
+        - Activates the last opened document.
+        """
+
+        workspace = self.current_workspace
+
+        if not workspace or not os.path.isdir(workspace):
+            self.show_error(
+                "Please select a valid workspace first."
+            )
+            return
+
+        workspace = os.path.realpath(workspace)
+
+        # Get selected rows.
+        selected_rows = sorted({
+            index.row()
+            for index in self.parts_table.selectionModel().selectedRows()
+        })
+
+        if not selected_rows:
+            self.show_error(
+                "Please select one or more parts to open."
+            )
+            return
+
+        opened_count = 0
+        already_open_count = 0
+        errors = []
+        last_document = None
+
+        for row in selected_rows:
+
+            item = self.parts_table.item(row, 0)
+
+            if item is None:
+                continue
+
+            relative_path = item.text()
+
+            # Resolve the file path inside the workspace.
+            file_path = os.path.realpath(
+                os.path.join(
+                    workspace,
+                    relative_path
+                )
+            )
+
+            # Prevent opening files outside the workspace.
+            try:
+                if os.path.commonpath(
+                        [workspace, file_path]
+                ) != workspace:
+                    errors.append(
+                        "Invalid workspace path: {}".format(
+                            relative_path
+                        )
+                    )
+                    continue
+
+            except ValueError:
+                errors.append(
+                    "Invalid workspace path: {}".format(
+                        relative_path
+                    )
+                )
+                continue
+
+            if not os.path.isfile(file_path):
+                errors.append(
+                    "File does not exist: {}".format(
+                        relative_path
+                    )
+                )
+                continue
+
+            if not file_path.lower().endswith(".fcstd"):
+                errors.append(
+                    "Not a FreeCAD document: {}".format(
+                        relative_path
+                    )
+                )
+                continue
+
+            try:
+                # Check whether the document is already open.
+                existing_document = None
+
+                for doc in FreeCAD.listDocuments().values():
+
+                    doc_path = getattr(
+                        doc,
+                        "FileName",
+                        ""
+                    )
+
+                    if not doc_path:
+                        continue
+
+                    if os.path.realpath(doc_path) == file_path:
+                        existing_document = doc
+                        break
+
+                if existing_document is not None:
+
+                    FreeCAD.Console.PrintMessage(
+                        "PLM: Document already open: {}\n".format(
+                            relative_path
+                        )
+                    )
+
+                    last_document = existing_document
+
+                    already_open_count += 1
+
+                else:
+                    # Open the document in FreeCAD.
+                    FreeCAD.Console.PrintMessage(
+                        "PLM: Opening workspace part: {}\n".format(
+                            file_path
+                        )
+                    )
+
+                    doc = FreeCAD.openDocument(
+                        file_path
+                    )
+
+                    if doc is None:
+                        raise RuntimeError(
+                            "FreeCAD did not return a document."
+                        )
+
+                    last_document = doc
+
+                    opened_count += 1
+
+            except Exception as exc:
+
+                errors.append(
+                    "{}: {}".format(
+                        relative_path,
+                        exc
+                    )
+                )
+
+                FreeCAD.Console.PrintError(
+                    "PLM: Failed to open {}: {}\n".format(
+                        relative_path,
+                        exc
+                    )
+                )
+
+        # Activate the last successfully opened document.
+        if last_document is not None:
+
+            try:
+                FreeCAD.setActiveDocument(
+                    last_document.Name
+                )
+
+                FreeCADGui.activeDocument().activeView().viewAxonometric()
+                FreeCADGui.activeDocument().activeView().fitAll()
+
+            except Exception as exc:
+                FreeCAD.Console.PrintWarning(
+                    "PLM: Could not update document view: {}\n".format(
+                        exc
+                    )
+                )
+
+        # Display results.
+        summary = (
+            "Opened {} document(s). "
+            "{} already open.".format(
+                opened_count,
+                already_open_count
+            )
+        )
+
+        if errors:
+            summary += "\n\nErrors:\n" + "\n".join(errors)
+
+            QtWidgets.QMessageBox.warning(
+                self.dialog,
+                "Open in FreeCAD",
+                summary
+            )
+
+        self.status_label.setText(
+            summary
+        )
+
+        FreeCAD.Console.PrintMessage(
+            "PLM: {}\n".format(
+                summary.replace("\n", " ")
+            )
+        )
+
     # ---------------------------------------------------------
     # Import files into workspace
     # ---------------------------------------------------------
