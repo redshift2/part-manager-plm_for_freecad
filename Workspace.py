@@ -172,6 +172,18 @@ class WorkspacePanel:
         table_action_layout.addWidget(
             self.checkin_button
         )
+        # Edit tags assigned to selected PLM parts.
+        self.edit_tags_button = QtWidgets.QPushButton(
+            "Edit Tags"
+        )
+
+        self.edit_tags_button.clicked.connect(
+            self.edit_part_tags
+        )
+
+        table_action_layout.addWidget(
+            self.edit_tags_button
+        )
         table_action_layout.addStretch()
         layout.addLayout(table_action_layout)
 
@@ -189,7 +201,7 @@ class WorkspacePanel:
     # Select PLM tags using hierarchical tree
     # ---------------------------------------------------------
 
-    def select_plm_tags(self):
+    def select_plm_tags(self, selected_tags=None):
         """
         Display PLM tags in a hierarchical tree.
 
@@ -202,7 +214,13 @@ class WorkspacePanel:
         """
 
         import PlmTags
+        tags = PlmTags.get_tags(self.connection)
+        if selected_tags is None:
+            selected_tags = []
 
+        selected_tags = {
+            str(tag_id) for tag_id in selected_tags
+        }
         try:
             tags = PlmTags.get_tags(self.connection)
 
@@ -273,7 +291,9 @@ class WorkspacePanel:
 
             item.setCheckState(
                 0,
-                QtCore.Qt.Unchecked
+                QtCore.Qt.Checked
+                if tag_id in selected_tags
+                else QtCore.Qt.Unchecked
             )
 
             # Store by ID for collecting selected tags.
@@ -405,6 +425,351 @@ class WorkspacePanel:
 
         return selected_tag_ids
 
+
+    # ---------------------------------------------------------
+    # Edit tags assigned to selected workspace parts
+    # ---------------------------------------------------------
+
+    def edit_part_tags(self):
+        """
+        Edit PLM tags for selected workspace parts.
+
+        Features:
+        - Supports one or multiple selected parts.
+        - Loads existing tags from the server.
+        - Opens the hierarchical tag selection dialog.
+        - Saves tags using PlmTags.set_part_tags().
+        - Refreshes the workspace table.
+        """
+
+        # -----------------------------------------------------
+        # Verify connection
+        # -----------------------------------------------------
+
+        self.connection = Login.get_connection()
+
+        if not self.connection or not self.connection.connected:
+            self.show_error(
+                "Please connect to the PLM server first."
+            )
+            return
+
+        # -----------------------------------------------------
+        # Get selected workspace parts
+        # -----------------------------------------------------
+
+        selected_rows = sorted({
+            index.row()
+            for index in self.parts_table.selectionModel().selectedRows()
+        })
+
+        if not selected_rows:
+            self.show_error(
+                "Please select one or more parts to edit tags."
+            )
+            return
+
+        relative_paths = []
+
+        for row in selected_rows:
+
+            item = self.parts_table.item(row, 0)
+
+            if item is None:
+                continue
+
+            relative_paths.append(
+                item.text().replace("\\", "/")
+            )
+
+        if not relative_paths:
+            return
+
+        # -----------------------------------------------------
+        # Retrieve server inventory
+        # -----------------------------------------------------
+
+        try:
+
+            server_inventory = self.get_server_inventory(
+                relative_paths
+            )
+
+        except Exception as exc:
+
+            self.show_error(
+                "Could not retrieve PLM part information:\n\n{}".format(
+                    exc
+                )
+            )
+            return
+
+        # -----------------------------------------------------
+        # Resolve selected PLM parts
+        # -----------------------------------------------------
+
+        selected_parts = []
+        errors = []
+
+        for relative_path in relative_paths:
+
+            key = relative_path.lower()
+
+            server_part = (
+                server_inventory.get(key)
+                or server_inventory.get(
+                    os.path.basename(key)
+                )
+            )
+
+            if not server_part or not server_part.get("exists"):
+
+                errors.append(
+                    "{}: Not found in PLM".format(
+                        relative_path
+                    )
+                )
+                continue
+
+            part_id = server_part.get("plmPartId")
+
+            if part_id is None:
+
+                errors.append(
+                    "{}: Missing PLM part ID".format(
+                        relative_path
+                    )
+                )
+                continue
+
+            selected_parts.append({
+                "name": relative_path,
+                "part_id": part_id,
+                "tags": server_part.get("tags", [])
+            })
+
+        if not selected_parts:
+
+            self.show_error(
+                "None of the selected parts exists in PLM."
+            )
+            return
+
+        # -----------------------------------------------------
+        # Retrieve available tags
+        # -----------------------------------------------------
+
+        try:
+
+            available_tags = PlmTags.get_tags(
+                self.connection
+            )
+
+        except Exception as exc:
+
+            self.show_error(
+                "Could not retrieve PLM tags:\n\n{}".format(
+                    exc
+                )
+            )
+            return
+
+        # Map tag names to tag IDs.
+        tag_name_to_id = {}
+
+        for tag in available_tags:
+
+            tag_name = str(
+                tag.get("name", "")
+            ).strip()
+
+            tag_id = tag.get("id")
+
+            if tag_name and tag_id is not None:
+
+                tag_name_to_id[tag_name] = int(tag_id)
+
+        # -----------------------------------------------------
+        # Determine currently assigned tags
+        # -----------------------------------------------------
+
+        # For a single selected part, preselect its tags.
+        # For multiple parts, preselect only tags common to all.
+        #
+        # The chosen tags will replace the tags on every
+        # selected part.
+
+        existing_tag_sets = []
+
+        for part in selected_parts:
+
+            existing_ids = set()
+
+            for tag in part["tags"]:
+
+                if isinstance(tag, dict):
+
+                    tag_id = tag.get("id")
+
+                    if tag_id is not None:
+                        existing_ids.add(int(tag_id))
+                        continue
+
+                    tag_name = str(
+                        tag.get("name", "")
+                    )
+
+                else:
+
+                    tag_name = str(tag)
+
+                tag_id = tag_name_to_id.get(
+                    tag_name
+                )
+
+                if tag_id is not None:
+                    existing_ids.add(tag_id)
+
+            existing_tag_sets.append(existing_ids)
+
+        selected_tag_ids = []
+
+        if existing_tag_sets:
+
+            common_tags = set.intersection(
+                *existing_tag_sets
+            )
+
+            selected_tag_ids = sorted(
+                common_tags
+            )
+
+        # -----------------------------------------------------
+        # Open tag selection dialog
+        # -----------------------------------------------------
+
+        tag_ids = self.select_plm_tags(
+            selected_tags=selected_tag_ids
+        )
+
+        if tag_ids is None:
+            return
+
+        # -----------------------------------------------------
+        # Confirm changes
+        # -----------------------------------------------------
+
+        part_names = "\n".join(
+            part["name"]
+            for part in selected_parts
+        )
+
+        answer = QtWidgets.QMessageBox.question(
+            self.dialog,
+            "Edit PLM Tags",
+            "Replace the tags assigned to the following "
+            "{} part(s)?\n\n"
+            "{}\n\n"
+            "Selected tags: {}\n\n"
+            "This will replace the existing tags on "
+            "each selected part.".format(
+                len(selected_parts),
+                part_names,
+                len(tag_ids)
+            ),
+            QtWidgets.QMessageBox.Yes
+            | QtWidgets.QMessageBox.No,
+            QtWidgets.QMessageBox.No
+        )
+
+        if answer != QtWidgets.QMessageBox.Yes:
+            return
+
+        # -----------------------------------------------------
+        # Update tags on server
+        # -----------------------------------------------------
+
+        updated_count = 0
+
+        self.edit_tags_button.setEnabled(False)
+
+        try:
+
+            for part in selected_parts:
+
+                try:
+
+                    PlmTags.set_part_tags(
+                        part_id=part["part_id"],
+                        tag_ids=tag_ids,
+                        connection=self.connection
+                    )
+
+                    updated_count += 1
+
+                    FreeCAD.Console.PrintMessage(
+                        "PLM: Updated tags {} for part {}\n".format(
+                            tag_ids,
+                            part["part_id"]
+                        )
+                    )
+
+                except Exception as exc:
+
+                    errors.append(
+                        "{}: {}".format(
+                            part["name"],
+                            exc
+                        )
+                    )
+
+        finally:
+
+            self.edit_tags_button.setEnabled(True)
+
+        # -----------------------------------------------------
+        # Refresh workspace table
+        # -----------------------------------------------------
+
+        self.refresh_parts()
+
+        # -----------------------------------------------------
+        # Display result
+        # -----------------------------------------------------
+
+        summary = (
+            "Updated tags for {} part(s).".format(
+                updated_count
+            )
+        )
+
+        if errors:
+
+            summary += (
+                "\n\nThe following parts could not "
+                "be updated:\n\n"
+                + "\n".join(errors)
+            )
+
+            QtWidgets.QMessageBox.warning(
+                self.dialog,
+                "Edit PLM Tags",
+                summary
+            )
+
+        else:
+
+            QtWidgets.QMessageBox.information(
+                self.dialog,
+                "Edit PLM Tags",
+                summary
+            )
+
+        self.status_label.setText(
+            "Tags updated for {} part(s).".format(
+                updated_count
+            )
+        )
     # ---------------------------------------------------------
     # Check selected workspace parts into PLM
     # ---------------------------------------------------------
