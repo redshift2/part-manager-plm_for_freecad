@@ -132,27 +132,51 @@ class WorkspacePanel:
 
         layout.addWidget(self.parts_table, 1)
 
-        # Table actions: Import, Sync, and Remove from Workspace
+        # -----------------------------------------------------
+        # Workspace actions - icon toolbar
+        # -----------------------------------------------------
+
         table_action_layout = QtWidgets.QHBoxLayout()
 
-        self.import_button = QtWidgets.QPushButton("Import to Workspace")
-        self.import_button.clicked.connect(self.import_to_workspace)
-        table_action_layout.addWidget(self.import_button)
+        table_action_layout.setSpacing(6)
 
-        self.sync_button = QtWidgets.QPushButton("Sync with Server")
-        self.sync_button.clicked.connect(self.sync_with_server)
-        table_action_layout.addWidget(self.sync_button)
-
-        self.remove_workspace_button = QtWidgets.QPushButton("Remove from Workspace")
-        self.remove_workspace_button.clicked.connect(self.remove_from_workspace)
-        table_action_layout.addWidget(self.remove_workspace_button)
-
-        # Open selected workspace parts in FreeCAD.
-        self.open_freecad_button = QtWidgets.QPushButton(
-            "Open in FreeCAD"
+        # Import to Workspace
+        self.import_button = self.create_icon_button(
+            "import.svg",
+            "Import files into workspace",
+            self.import_to_workspace
         )
 
-        self.open_freecad_button.clicked.connect(
+        table_action_layout.addWidget(
+            self.import_button
+        )
+
+        # Sync with Server
+        self.sync_button = self.create_icon_button(
+            "sync.svg",
+            "Synchronize workspace with PLM server",
+            self.sync_with_server
+        )
+
+        table_action_layout.addWidget(
+            self.sync_button
+        )
+
+        # Remove from Workspace
+        self.remove_workspace_button = self.create_icon_button(
+            "remove.svg",
+            "Remove selected parts from workspace",
+            self.remove_from_workspace
+        )
+
+        table_action_layout.addWidget(
+            self.remove_workspace_button
+        )
+
+        # Open in FreeCAD
+        self.open_freecad_button = self.create_icon_button(
+            "open.svg",
+            "Open selected parts in FreeCAD",
             self.open_in_freecad
         )
 
@@ -160,31 +184,31 @@ class WorkspacePanel:
             self.open_freecad_button
         )
 
-        # Check selected workspace parts into PLM.
-        self.checkin_button = QtWidgets.QPushButton(
-            "Check-In to PLM"
-        )
-
-        self.checkin_button.clicked.connect(
+        # Check-In to PLM
+        self.checkin_button = self.create_icon_button(
+            "checkin.svg",
+            "Check selected parts into PLM",
             self.check_in_to_plm
         )
 
         table_action_layout.addWidget(
             self.checkin_button
         )
-        # Edit tags assigned to selected PLM parts.
-        self.edit_tags_button = QtWidgets.QPushButton(
-            "Edit Tags"
-        )
 
-        self.edit_tags_button.clicked.connect(
+        # Edit Tags
+        self.edit_tags_button = self.create_icon_button(
+            "tags.svg",
+            "Edit tags for selected PLM parts",
             self.edit_part_tags
         )
 
         table_action_layout.addWidget(
             self.edit_tags_button
         )
+
         table_action_layout.addStretch()
+
+        layout.addLayout(table_action_layout)
         layout.addLayout(table_action_layout)
 
         # Status
@@ -425,7 +449,33 @@ class WorkspacePanel:
 
         return selected_tag_ids
 
+    def create_icon_button(self, icon_name, tooltip, callback):
+        """
+        Create an icon-only toolbar button.
+        """
 
+        button = QtWidgets.QPushButton()
+
+        icon_path = os.path.join(
+            ICON_DIR,
+            icon_name
+        )
+
+        button.setIcon(
+            QtGui.QIcon(icon_path)
+        )
+
+        button.setIconSize(
+            QtCore.QSize(28, 28)
+        )
+
+        button.setFixedSize(42, 42)
+
+        button.setToolTip(tooltip)
+
+        button.clicked.connect(callback)
+
+        return button
     # ---------------------------------------------------------
     # Edit tags assigned to selected workspace parts
     # ---------------------------------------------------------
