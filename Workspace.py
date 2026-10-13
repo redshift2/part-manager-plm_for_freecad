@@ -106,12 +106,13 @@ class WorkspacePanel:
 
         # Parts table
         self.parts_table = QtWidgets.QTableWidget()
-        self.parts_table.setColumnCount(4)
+        self.parts_table.setColumnCount(5)
         self.parts_table.setHorizontalHeaderLabels([
             "Local Part",
             "Local Version",
             "Server Version",
-            "PLM Status"
+            "PLM Status",
+            "Tags"
         ])
 
         self.parts_table.setSelectionMode(
@@ -123,10 +124,11 @@ class WorkspacePanel:
         self.parts_table.setAlternatingRowColors(True)
 
         header = self.parts_table.horizontalHeader()
-        header.setSectionResizeMode(0, QtWidgets.QHeaderView.Stretch)
-        header.setSectionResizeMode(1, QtWidgets.QHeaderView.ResizeToContents)
-        header.setSectionResizeMode(2, QtWidgets.QHeaderView.ResizeToContents)
-        header.setSectionResizeMode(3, QtWidgets.QHeaderView.ResizeToContents)
+        header.setSectionResizeMode(0, QtWidgets.QHeaderView.Stretch )
+        header.setSectionResizeMode( 1, QtWidgets.QHeaderView.ResizeToContents)
+        header.setSectionResizeMode( 2, QtWidgets.QHeaderView.ResizeToContents)
+        header.setSectionResizeMode( 3, QtWidgets.QHeaderView.ResizeToContents)
+        header.setSectionResizeMode( 4, QtWidgets.QHeaderView.Stretch )
 
         layout.addWidget(self.parts_table, 1)
 
@@ -693,9 +695,6 @@ class WorkspacePanel:
                 "PLM: Workspace check-in completed.\n"
             )
 
-            # Refresh local and server version information.
-            self.refresh_parts()
-
             self.status_label.setText(
                 "Check-in complete: {} document(s).".format(
                     len(documents)
@@ -765,6 +764,8 @@ class WorkspacePanel:
                             part_id
                         )
                     )
+                    # Refresh after uploading and assigning tags.
+                    self.refresh_parts()
 
                 except Exception as exc:
                     tag_errors.append(
@@ -2290,6 +2291,7 @@ class WorkspacePanel:
                 "exists": part.get("existsInPlm", False),
                 "status": part.get("plmStatus", ""),
                 "plmPartId": part.get("plmPartId"),
+                "tags": part.get("tags", []),
                 "part": part
             }
 
@@ -2486,7 +2488,52 @@ class WorkspacePanel:
                 3,
                 status_item
             )
+            # -----------------------------------------------------
+            # PLM Tags
+            # -----------------------------------------------------
 
+            tags_text = "—"
+
+            if server_part is not None:
+
+                tags = server_part.get("tags", [])
+
+                if isinstance(tags, list):
+
+                    tag_names = []
+
+                    for tag in tags:
+
+                        if isinstance(tag, dict):
+                            name = tag.get("name", "")
+
+                        else:
+                            name = str(tag)
+
+                        if name:
+                            tag_names.append(str(name))
+
+                    if tag_names:
+                        tags_text = ", ".join(tag_names)
+
+                elif isinstance(tags, str):
+
+                    if tags.strip():
+                        tags_text = tags.strip()
+
+            tags_item = QtWidgets.QTableWidgetItem(
+                tags_text
+            )
+
+            tags_item.setToolTip(
+                tags_text
+            )
+
+            self.parts_table.setItem(
+                row,
+                4,
+                tags_item
+            )
         self.refresh_button.setEnabled(True)
 
         if inventory is None:
