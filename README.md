@@ -69,7 +69,8 @@ This function will download parts from the server. You have 3 options.
 ## <img src="./icons/workspace.svg" alt="drawing" width="32"/> Workspace Manager
 
 ![](./images/workspace.png)
-This is power dialog window. First of all this is where you create a workspace. A workspace is the location of your local computer that parts will be download from the PLM sever
+
+This is a power dialog window. First of all this is where you create a workspace. A workspace is the location of your local computer that parts will be download from the PLM sever
 
 All the parts in the local workspace will be displayed in the table. The local version of the part is the version that was last downloaded from the server. If there is a mis-match between the local version and the server version the mis-match will be highlighted in red.
 
