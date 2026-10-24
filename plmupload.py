@@ -83,6 +83,55 @@ class PlmUploader:
         return self.connection.url.rstrip("/") + "/" + endpoint
 
     # ------------------------------------------------------------
+    # Lifecycle operations
+    # ------------------------------------------------------------
+
+    CHECKOUT_ENDPOINT = "plmJson/checkOutPart"
+
+    def check_out_part(self, part_id):
+        """Check out an existing PLM part to the authenticated user.
+
+        Returns the server's JSON response. Raises PlmUploadError on
+        authorization, lifecycle, or network failures.
+        """
+        self._require_connection()
+        try:
+            part_id = int(part_id)
+        except (TypeError, ValueError):
+            raise PlmUploadError("A valid PLM part ID is required for checkout.")
+        if part_id <= 0:
+            raise PlmUploadError("A positive PLM part ID is required for checkout.")
+
+        try:
+            response = self.connection.session.post(
+                self._url(self.CHECKOUT_ENDPOINT),
+                json={"partId": part_id},
+                timeout=30,
+            )
+        except requests.RequestException as exc:
+            raise PlmUploadError("Checkout request failed: {}".format(exc))
+
+        if not response.ok:
+            try:
+                error_data = response.json()
+                detail = error_data.get("error") or error_data.get("message")
+            except (ValueError, AttributeError):
+                detail = None
+            raise PlmUploadError(
+                "PLM checkout failed (HTTP {}): {}".format(
+                    response.status_code, detail or response.text[:2000]
+                )
+            )
+
+        try:
+            result = response.json()
+        except ValueError:
+            raise PlmUploadError("PLM checkout returned invalid JSON.")
+        if not isinstance(result, dict) or result.get("success") is not True:
+            raise PlmUploadError("PLM checkout did not confirm success: {}".format(result))
+        return result
+
+    # ------------------------------------------------------------
     # Document discovery
     # ------------------------------------------------------------
 

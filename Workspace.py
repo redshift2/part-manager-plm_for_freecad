@@ -52,7 +52,7 @@ class WorkspacePanel:
 
         self.dialog = QtWidgets.QDialog()
         self.dialog.setWindowTitle("Parts Manager - Workspace")
-        self.dialog.resize(650, 450)
+        self.dialog.resize(1100, 520)
 
         self.build_ui()
         self.load_workspaces()
@@ -106,12 +106,13 @@ class WorkspacePanel:
 
         # Parts table
         self.parts_table = QtWidgets.QTableWidget()
-        self.parts_table.setColumnCount(5)
+        self.parts_table.setColumnCount(6)
         self.parts_table.setHorizontalHeaderLabels([
             "Local Part",
             "Local Version",
-            "Server Version",
-            "PLM Status",
+            "CAD Version",
+            "Lifecycle State",
+            "Checked Out By",
             "Tags"
         ])
 
@@ -128,7 +129,8 @@ class WorkspacePanel:
         header.setSectionResizeMode( 1, QtWidgets.QHeaderView.ResizeToContents)
         header.setSectionResizeMode( 2, QtWidgets.QHeaderView.ResizeToContents)
         header.setSectionResizeMode( 3, QtWidgets.QHeaderView.ResizeToContents)
-        header.setSectionResizeMode( 4, QtWidgets.QHeaderView.Stretch )
+        header.setSectionResizeMode( 4, QtWidgets.QHeaderView.ResizeToContents)
+        header.setSectionResizeMode( 5, QtWidgets.QHeaderView.Stretch )
 
         layout.addWidget(self.parts_table, 1)
 
@@ -183,6 +185,17 @@ class WorkspacePanel:
         table_action_layout.addWidget(
             self.open_freecad_button
         )
+
+        # Check Out selected PLM parts
+        self.checkout_button = self.create_icon_button(
+            "checkout.svg",
+            "Check out selected PLM parts to your account",
+            self.check_out_parts
+        )
+        # Provide a visible label if checkout.svg has not been installed.
+        if not os.path.isfile(os.path.join(ICON_DIR, "checkout.svg")):
+            self.checkout_button.setText("Out")
+        table_action_layout.addWidget(self.checkout_button)
 
         # Check-In to PLM
         self.checkin_button = self.create_icon_button(
@@ -820,6 +833,105 @@ class WorkspacePanel:
                 updated_count
             )
         )
+    # ---------------------------------------------------------
+    # Check out selected PLM parts
+    # ---------------------------------------------------------
+
+    def check_out_parts(self):
+        """Check out selected server parts using the current PLM login."""
+        import plmupload
+
+        self.connection = Login.get_connection()
+        if not self.connection or not self.connection.connected:
+            self.show_error("Please connect to the PLM server first.")
+            return
+
+        rows = sorted({
+            index.row()
+            for index in self.parts_table.selectionModel().selectedRows()
+        })
+        if not rows:
+            self.show_error("Select one or more parts to check out.")
+            return
+
+        paths = []
+        for row in rows:
+            item = self.parts_table.item(row, 0)
+            if item is not None:
+                paths.append(item.text().replace("\\", "/"))
+        if not paths:
+            return
+
+        try:
+            inventory = self.get_server_inventory(paths)
+        except Exception as exc:
+            self.show_error("Could not retrieve server inventory:\n{}".format(exc))
+            return
+
+        eligible = []
+        skipped = []
+        seen_ids = set()
+        for path in paths:
+            key = path.lower()
+            entry = inventory.get(key) or inventory.get(os.path.basename(key))
+            if not entry or not entry.get("exists"):
+                skipped.append("{}: not in PLM".format(path))
+                continue
+            part_id = entry.get("plmPartId")
+            if part_id is None:
+                skipped.append("{}: missing PLM part ID".format(path))
+                continue
+            if entry.get("canCheckOut") is False or (
+                entry.get("part", {}).get("canCheckOut") is False
+            ):
+                skipped.append("{}: checkout not permitted (state: {}, owner: {})".format(
+                    path, entry.get("status"), entry.get("checkedOutBy") or "none"))
+                continue
+            if part_id not in seen_ids:
+                seen_ids.add(part_id)
+                eligible.append((path, part_id))
+
+        if not eligible:
+            self.show_error("No selected parts can be checked out.\n\n" +
+                            "\n".join(skipped))
+            return
+
+        answer = QtWidgets.QMessageBox.question(
+            self.dialog, "Check Out Parts",
+            "Check out {} part(s) to your PLM account?\n\n{}".format(
+                len(eligible), "\n".join(path for path, _ in eligible)),
+            QtWidgets.QMessageBox.Yes | QtWidgets.QMessageBox.No,
+            QtWidgets.QMessageBox.No
+        )
+        if answer != QtWidgets.QMessageBox.Yes:
+            return
+
+        completed = []
+        errors = list(skipped)
+        self.checkout_button.setEnabled(False)
+        try:
+            uploader = plmupload.PlmUploader(connection=self.connection)
+            for path, part_id in eligible:
+                try:
+                    result = uploader.check_out_part(part_id)
+                    completed.append(path)
+                    FreeCAD.Console.PrintMessage(
+                        "PLM: Checked out {} (ID {}): {}\n".format(
+                            path, part_id, result.get("lifecycleState", "CHECKED_OUT")))
+                except Exception as exc:
+                    errors.append("{}: {}".format(path, exc))
+        finally:
+            self.checkout_button.setEnabled(True)
+            self.refresh_parts()
+
+        summary = "Checked out {} part(s).".format(len(completed))
+        if errors:
+            summary += "\n\nSkipped or failed:\n" + "\n".join(errors)
+            QtWidgets.QMessageBox.warning(self.dialog, "Check Out Parts", summary)
+        else:
+            QtWidgets.QMessageBox.information(self.dialog, "Check Out Parts", summary)
+        self.status_label.setText(summary)
+
     # ---------------------------------------------------------
     # Check selected workspace parts into PLM
     # ---------------------------------------------------------
@@ -2139,7 +2251,6 @@ class WorkspacePanel:
 
             local_version = local_entry.get("version")
             server_version = server_entry.get("version")
-
             if not server_entry.get("exists", False):
                 continue
 
@@ -2167,8 +2278,9 @@ class WorkspacePanel:
                 server_entry.get("part") or {}
             )
 
-            server_part_data["latestVersion"] = server_version
-            server_part_data["version"] = server_version
+            # Preserve both values: PlmDownload may still use latestVersion.
+            server_part_data["latestVersion"] = server_entry.get("legacyVersion")
+            server_part_data["version"] = server_entry.get("version")
 
             updates.append({
                 "path": local_path,
@@ -2575,7 +2687,9 @@ class WorkspacePanel:
             if not filename:
                 continue
 
-            version = part.get("version")
+            version = part.get("cadVersion") or part.get("version")
+            if version is not None and "." not in str(version):
+                version = None  # legacy computedVersion, not a CAD revision
 
             if version is None:
                 version_text = "Unknown"
@@ -2696,15 +2810,22 @@ class WorkspacePanel:
                     "\\", "/"
                 ).lower()
 
-            latest_version = part.get("latestVersion")
-
-            if latest_version is None:
-                latest_version = "—"
+            # CAD version is independent of the legacy computedVersion.
+            cad_version = part.get("version")
+            if cad_version in (None, ""):
+                major = part.get("majorVersion")
+                minor = part.get("minorVersion")
+                if major is not None and minor is not None:
+                    cad_version = "{}.{}".format(major, minor)
 
             entry = {
-                "version": str(latest_version),
+                "version": str(cad_version) if cad_version not in (None, "") else "—",
+                "legacyVersion": part.get("latestVersion"),
                 "exists": part.get("existsInPlm", False),
-                "status": part.get("plmStatus", ""),
+                "status": part.get("lifecycleState") or "Unknown",
+                "checkedOutBy": part.get("checkedOutBy") or "",
+                "canCheckIn": part.get("canCheckIn"),
+                "canCheckOut": part.get("canCheckOut"),
                 "plmPartId": part.get("plmPartId"),
                 "tags": part.get("tags", []),
                 "part": part
@@ -2738,10 +2859,21 @@ class WorkspacePanel:
         if server_version in (None, "", "Unknown", "—", "Not in PLM"):
             return False
 
-        try:
-            return float(server_version) > float(local_version)
-        except (ValueError, TypeError):
+        def parse(value):
+            text = str(value).strip()
+            if not text or not all(piece.isdigit() for piece in text.split(".")):
+                return None
+            return tuple(int(piece) for piece in text.split("."))
+
+        local = parse(local_version)
+        server = parse(server_version)
+        if local is None or server is None:
             return False
+        # Do not compare legacy integer revisions against major.minor CAD
+        # versions. They are different versioning schemes.
+        if len(local) != len(server):
+            return False
+        return server > local
 
 
     # ---------------------------------------------------------
@@ -2822,8 +2954,6 @@ class WorkspacePanel:
                 local_version_item
             )
             version_text = "Unknown"
-
-            version_text = "Unknown"
             server_part = None
 
             if inventory is not None:
@@ -2852,9 +2982,10 @@ class WorkspacePanel:
             # Flag the server version in red if it is newer
             # than the locally recorded version.
             if server_part is not None and local_part is not None:
+                local_compare = local_part.get("version")
+                server_compare = server_part.get("version")
                 if self.server_version_is_newer(
-                        local_part.get("version"),
-                        server_part.get("version")
+                        local_compare, server_compare
                 ):
                     version_item.setForeground(
                         QtGui.QBrush(QtGui.QColor("red"))
@@ -2869,7 +3000,7 @@ class WorkspacePanel:
                 version_item
             )
 
-            # PLM status
+            # Lifecycle state
             status_text = "Unknown"
 
             if inventory is not None:
@@ -2898,11 +3029,20 @@ class WorkspacePanel:
                 str(status_text)
             )
 
-            self.parts_table.setItem(
-                row,
-                3,
-                status_item
-            )
+            if status_text == "CHECKED_OUT":
+                status_item.setForeground(QtGui.QBrush(QtGui.QColor(0, 110, 180)))
+            elif status_text == "RELEASED":
+                status_item.setForeground(QtGui.QBrush(QtGui.QColor(0, 125, 55)))
+
+            self.parts_table.setItem(row, 3, status_item)
+
+            owner_text = "—"
+            if server_part is not None:
+                owner_text = server_part.get("checkedOutBy") or "—"
+            owner_item = QtWidgets.QTableWidgetItem(str(owner_text))
+            if server_part is not None and server_part.get("canCheckIn") is False:
+                owner_item.setToolTip("Server reports that this user cannot check in this part.")
+            self.parts_table.setItem(row, 4, owner_item)
             # -----------------------------------------------------
             # PLM Tags
             # -----------------------------------------------------
@@ -2946,7 +3086,7 @@ class WorkspacePanel:
 
             self.parts_table.setItem(
                 row,
-                4,
+                5,
                 tags_item
             )
         self.refresh_button.setEnabled(True)

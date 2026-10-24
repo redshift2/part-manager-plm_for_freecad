@@ -123,7 +123,7 @@ def collect_documents(root_doc):
 
 
 class PlmCheckInDialog(QtGui.QDialog):
-    COL_INCLUDE, COL_PART, COL_FILE, COL_STATUS, COL_VERSION, COL_MODIFIED, COL_SIZE = range(7)
+    COL_INCLUDE, COL_PART, COL_FILE, COL_STATUS, COL_VERSION, COL_OWNER, COL_MODIFIED, COL_SIZE = range(8)
     def __init__(self, parent=None):
         super(PlmCheckInDialog, self).__init__(parent)
         self.setWindowTitle('PLM Check-In')
@@ -193,13 +193,14 @@ class PlmCheckInDialog(QtGui.QDialog):
         info.addWidget(self.size_label, 1, 2)
         layout.addLayout(info)
 
-        self.table = QtGui.QTableWidget(0, 7)
+        self.table = QtGui.QTableWidget(0, 8)
         self.table.setHorizontalHeaderLabels([
             'Include',
             'Part / Document',
             'File',
-            'PLM Status',
-            'Version',
+            'Lifecycle State',
+            'CAD Version',
+            'Checked Out By',
             'Modified',
             'File Size'
         ])
@@ -216,6 +217,7 @@ class PlmCheckInDialog(QtGui.QDialog):
             hv.setSectionResizeMode(self.COL_FILE, mode.Stretch)
             hv.setSectionResizeMode(self.COL_STATUS, mode.ResizeToContents)
             hv.setSectionResizeMode(self.COL_VERSION, mode.ResizeToContents)
+            hv.setSectionResizeMode(self.COL_OWNER, mode.ResizeToContents)
             hv.setSectionResizeMode(self.COL_MODIFIED, mode.ResizeToContents)
             hv.setSectionResizeMode(self.COL_SIZE, mode.ResizeToContents)
 
@@ -225,6 +227,7 @@ class PlmCheckInDialog(QtGui.QDialog):
             hv.setResizeMode(self.COL_FILE, QtGui.QHeaderView.Stretch)
             hv.setResizeMode(self.COL_STATUS, QtGui.QHeaderView.ResizeToContents)
             hv.setResizeMode(self.COL_VERSION, QtGui.QHeaderView.ResizeToContents)
+            hv.setResizeMode(self.COL_OWNER, QtGui.QHeaderView.ResizeToContents)
             hv.setResizeMode(self.COL_MODIFIED, QtGui.QHeaderView.ResizeToContents)
             hv.setResizeMode(self.COL_SIZE, QtGui.QHeaderView.ResizeToContents)
         layout.addWidget(self.table, 1)
@@ -241,12 +244,15 @@ class PlmCheckInDialog(QtGui.QDialog):
         self.remove_button = QtGui.QPushButton('Remove Selected')
         self.include_button = QtGui.QPushButton('Include All')
         self.exclude_button = QtGui.QPushButton('Exclude All')
+        self.checkout_button = QtGui.QPushButton('Check Out')
+        self.checkout_button.setToolTip('Check out selected existing PLM parts')
         self.checkin_button = QtGui.QPushButton('Check-In')
         self.checkin_button.setDefault(True)
         for button in (self.refresh_button, self.remove_button,
                        self.include_button, self.exclude_button):
             buttons.addWidget(button)
         buttons.addStretch(1)
+        buttons.addWidget(self.checkout_button)
         buttons.addWidget(self.checkin_button)
         layout.addLayout(buttons)
 
@@ -254,6 +260,7 @@ class PlmCheckInDialog(QtGui.QDialog):
         self.remove_button.clicked.connect(self.remove_selected)
         self.include_button.clicked.connect(lambda: self.set_all_included(True))
         self.exclude_button.clicked.connect(lambda: self.set_all_included(False))
+        self.checkout_button.clicked.connect(self.check_out_selected)
         self.checkin_button.clicked.connect(self.check_in)
         self.table.itemChanged.connect(self._item_changed)
 
@@ -417,14 +424,24 @@ class PlmCheckInDialog(QtGui.QDialog):
             if not normalized_path and name:
                 normalized_path = name.replace("\\", "/").lower()
 
-            latest_version = part.get("latestVersion")
-            if latest_version is None:
-                latest_version = "—"
+            # The server's "version" is the CAD major.minor version.
+            # "latestVersion" is a legacy internal revision counter.
+            cad_version = part.get("version")
+            if cad_version is None or str(cad_version).strip() == "":
+                major = part.get("majorVersion")
+                minor = part.get("minorVersion")
+                if major is not None and minor is not None:
+                    cad_version = "{}.{}".format(major, minor)
+                else:
+                    cad_version = "—"
 
             entry = {
-                "version": str(latest_version),
+                "version": str(cad_version),
                 "exists": part.get("existsInPlm", False),
-                "status": part.get("plmStatus", ""),
+                "status": part.get("lifecycleState") or "Unavailable",
+                "checkedOutBy": part.get("checkedOutBy"),
+                "canCheckIn": part.get("canCheckIn"),
+                "canCheckOut": part.get("canCheckOut"),
                 "plmPartId": part.get("plmPartId"),
                 "part": part,
             }
@@ -624,9 +641,8 @@ class PlmCheckInDialog(QtGui.QDialog):
         part = entry.get("part", {})
 
         status = (
-                entry.get("status")
-                or part.get("plmStatus")
-                or part.get("status")
+                part.get("lifecycleState")
+                or entry.get("status")
         )
 
         if status:
@@ -764,12 +780,12 @@ class PlmCheckInDialog(QtGui.QDialog):
                 file_item
             )
 
-            # PLM Status column.
+            # Lifecycle State column.
             status = self._plm_status(doc)
 
             status_item = QtGui.QTableWidgetItem(status)
 
-            if status.upper() == 'LOCKED':
+            if status.upper() == 'RELEASED':
                 status_item.setForeground(
                     QtGui.QBrush(QtGui.QColor(200, 0, 0))
                 )
@@ -780,7 +796,7 @@ class PlmCheckInDialog(QtGui.QDialog):
                 status_item
             )
 
-            # Version column.
+            # CAD Version column.
             version_item = QtGui.QTableWidgetItem(
                 _text(server_version)
             )
@@ -792,6 +808,23 @@ class PlmCheckInDialog(QtGui.QDialog):
                 self.COL_VERSION,
                 version_item
             )
+
+            # Checkout owner and server permission diagnostics.
+            owner = entry.get('checkedOutBy') if entry else None
+            owner_item = QtGui.QTableWidgetItem(_text(owner) or '—')
+            if entry and entry.get('exists'):
+                permission = entry.get('canCheckIn')
+                owner_item.setToolTip(
+                    'Server permits check-in: {}'.format(
+                        'Unknown' if permission is None else
+                        ('Yes' if permission else 'No')
+                    )
+                )
+                if permission is False:
+                    owner_item.setForeground(
+                        QtGui.QBrush(QtGui.QColor(200, 0, 0))
+                    )
+            self.table.setItem(row, self.COL_OWNER, owner_item)
 
             # Modified column.
             modified_item = QtGui.QTableWidgetItem(
@@ -924,6 +957,92 @@ class PlmCheckInDialog(QtGui.QDialog):
             QtGui.QApplication.processEvents()
         except Exception:
             pass
+
+    def check_out_selected(self):
+        """Check out selected existing parts using the authenticated uploader."""
+        connected, _url, _session, _workspace = self._connection()
+        if not connected:
+            QtGui.QMessageBox.warning(self, 'PLM Check Out',
+                                      'Connect to the PLM server first.')
+            return
+
+        rows = sorted({index.row() for index in
+                       self.table.selectionModel().selectedRows()})
+        if not rows:
+            QtGui.QMessageBox.information(self, 'PLM Check Out',
+                                          'Select one or more parts in the table first.')
+            return
+
+        eligible = []
+        skipped = []
+        seen_ids = set()
+        for row in rows:
+            item = self.table.item(row, self.COL_PART)
+            if item is None:
+                continue
+            doc = self.document_by_name.get(_text(item.data(USER_ROLE)))
+            if doc is None:
+                continue
+            name = _text(getattr(doc, 'Label', getattr(doc, 'Name', 'Part')))
+            entry = self._server_entry(doc)
+            if not entry or not entry.get('exists'):
+                skipped.append('{}: not in PLM'.format(name))
+                continue
+            part_id = entry.get('plmPartId')
+            if part_id is None:
+                skipped.append('{}: missing PLM part ID'.format(name))
+                continue
+            if entry.get('canCheckOut') is False:
+                skipped.append('{}: checkout not permitted by server'.format(name))
+                continue
+            if part_id not in seen_ids:
+                eligible.append((name, part_id))
+                seen_ids.add(part_id)
+
+        if not eligible:
+            QtGui.QMessageBox.information(self, 'PLM Check Out',
+                'No selected parts are eligible for checkout.\n\n' +
+                '\n'.join(skipped))
+            return
+
+        message = 'Check out the following {} part(s)?\n\n{}'.format(
+            len(eligible), '\n'.join(name for name, _ in eligible))
+        if skipped:
+            message += '\n\nSkipped:\n' + '\n'.join(skipped)
+        answer = QtGui.QMessageBox.question(
+            self, 'PLM Check Out', message,
+            QtGui.QMessageBox.Yes | QtGui.QMessageBox.No,
+            QtGui.QMessageBox.No)
+        if answer != QtGui.QMessageBox.Yes:
+            return
+
+        self.checkout_button.setEnabled(False)
+        succeeded = []
+        errors = []
+        try:
+            uploader = plmupload.PlmUploader(connection=self.connection)
+            for name, part_id in eligible:
+                try:
+                    uploader.check_out_part(part_id)
+                    succeeded.append(name)
+                except Exception as exc:
+                    errors.append('{}: {}'.format(name, exc))
+        except Exception as exc:
+            errors.append('Checkout could not start: {}'.format(exc))
+        finally:
+            self.checkout_button.setEnabled(True)
+            self.refresh()
+
+        summary = 'Checked out {} part(s).'.format(len(succeeded))
+        if skipped:
+            summary += '\n\nSkipped:\n' + '\n'.join(skipped)
+        if errors:
+            summary += '\n\nErrors:\n' + '\n'.join(errors)
+        self.status_label.setText(summary)
+        if errors:
+            QtGui.QMessageBox.warning(self, 'PLM Check Out', summary)
+        else:
+            QtGui.QMessageBox.information(self, 'PLM Check Out', summary)
 
     def check_in(self):
         connected, url, session, workspace = self._connection()

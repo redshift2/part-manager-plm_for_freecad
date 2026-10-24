@@ -23,6 +23,19 @@ import FreeCAD
 
 WORKSPACE_INVENTORY_FILENAME = "workspace.json"
 
+def _cad_version(metadata):
+    """Read CAD major.minor only, never computedVersion/latestVersion."""
+    if not isinstance(metadata, dict):
+        return None
+    value = metadata.get("cadVersion") or metadata.get("version")
+    if value is not None and "." in str(value):
+        return str(value)
+    major, minor = metadata.get("majorVersion"), metadata.get("minorVersion")
+    if major is not None and minor is not None:
+        return "{}.{}".format(major, minor)
+    return None
+
+
 
 def _inventory_path(workspace):
     """Return the absolute path to workspace.json."""
@@ -183,22 +196,16 @@ def save_workspace_part(
     if not isinstance(existing, dict):
         existing = {}
 
-    # Retrieve the server version.
-    version = None
-
-    if isinstance(part_data, dict):
-        for field in (
-            "computedVersion",
-            "latestVersion",
-            "version"
-        ):
-            if part_data.get(field) is not None:
-                version = part_data[field]
-                break
-
-    # Preserve the previous version if the server supplied none.
+    # CAD version is separate from legacy internal computedVersion.
+    # Keep unknown for existing local files whose actual CAD revision
+    # cannot be verified; do not silently substitute the server version.
+    version = _cad_version(part_data)
     if version is None:
-        version = existing.get("version")
+        version = existing.get("cadVersion")
+    legacy_version = (part_data.get("latestVersion") or
+                      part_data.get("computedVersion")) if isinstance(part_data, dict) else None
+    if legacy_version is None:
+        legacy_version = existing.get("legacyVersion", existing.get("version"))
 
     # Determine the filename.
     part_name = os.path.basename(destination_path)
@@ -216,6 +223,8 @@ def save_workspace_part(
         "partId": part_id,
         "name": part_name,
         "version": version,
+        "cadVersion": version,
+        "legacyVersion": legacy_version,
         "file": os.path.relpath(
             destination_path,
             workspace
@@ -428,13 +437,8 @@ def save_workspace_inventory(
                 )
                 continue
 
-            version = item.get("latestVersion")
-
-            if version is None:
-                version = item.get("computedVersion")
-
-            if version is None:
-                version = item.get("version")
+            version = _cad_version(item)
+            legacy_version = item.get("latestVersion", item.get("computedVersion"))
 
             key = str(part_id)
 
@@ -443,9 +447,12 @@ def save_workspace_inventory(
             if not isinstance(existing, dict):
                 existing = {}
 
-            # Preserve the previous version if necessary.
+            # Only this function's callers should pass freshly downloaded
+            # files. Never update a local version merely because server changed.
             if version is None:
-                version = existing.get("version")
+                version = existing.get("cadVersion")
+            if legacy_version is None:
+                legacy_version = existing.get("legacyVersion", existing.get("version"))
 
             parts[key] = {
                 "partId": part_id,
@@ -455,6 +462,8 @@ def save_workspace_inventory(
                     or os.path.basename(local_path)
                 ),
                 "version": version,
+                "cadVersion": version,
+                "legacyVersion": legacy_version,
                 "file": os.path.relpath(
                     local_path,
                     workspace

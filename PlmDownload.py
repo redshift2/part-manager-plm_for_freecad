@@ -144,26 +144,15 @@ def download_part(
             raise RuntimeError("Invalid part filename.")
 
         # Avoid downloading an existing file.
-        if os.path.isfile(destination_path):
+        if os.path.isfile(destination_path) and not force:
             FreeCAD.Console.PrintMessage(
                 "PLM: Part already exists in workspace: {}\n".format(
                     destination_path
                 )
             )
 
-            save_workspace_inventory(
-                connection,
-                workspace,
-                [destination_path],
-            )
-
-            save_workspace_part(
-                workspace,
-                part_id,
-                part_data,
-                destination_path,
-            )
-
+            # The file was not downloaded; its local CAD version must
+            # not be overwritten with the current server revision.
             return destination_path
 
         # Download the ZIP archive.
@@ -571,25 +560,20 @@ def get_part_information(
             ):
                 continue
 
-            version = item.get("latestVersion")
-
-            if version is None:
-                version = item.get("computedVersion")
-
-            if version is None:
-                version = item.get("version")
-
-            if version is not None:
-                part_data["latestVersion"] = version
-                part_data["computedVersion"] = version
-                part_data["version"] = version
-
+            cad_version = item.get("version")
+            if cad_version is None and item.get("majorVersion") is not None and item.get("minorVersion") is not None:
+                cad_version = "{}.{}".format(item["majorVersion"], item["minorVersion"])
+            if cad_version is not None:
+                part_data["version"] = str(cad_version)
+                part_data["cadVersion"] = str(cad_version)
+            legacy_version = item.get("latestVersion", item.get("computedVersion"))
+            if legacy_version is not None:
+                part_data["latestVersion"] = legacy_version
+                part_data["computedVersion"] = legacy_version
+            if cad_version is not None:
                 FreeCAD.Console.PrintMessage(
-                    "PLM: Version {} retrieved for part {}.\n".format(
-                        version, part_id
-                    )
+                    "PLM: CAD version {} retrieved for part {}.\n".format(cad_version, part_id)
                 )
-
                 return part_data
 
         FreeCAD.Console.PrintWarning(
