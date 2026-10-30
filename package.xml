@@ -6,10 +6,10 @@
 
   <tag>versioning</tag>
 
-  <version>2026.10.05</version>
-  <date>2026-10-05</date>
+  <version>v2.1</version>
+  <date>2026-10-29</date>
 
-  <maintainer email="">Redshift2</maintainer>
+  <maintainer email="">bernhart2002@gmail.com</maintainer>
 
   <license file="LICENSE">LGPL-2.1-or-later</license>
 
