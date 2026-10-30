@@ -26,6 +26,7 @@ KNOWN_SERVER_FEATURES = {
 }
 
 
+
 class PlmConnection:
     """Shared PLM connection state and authenticated HTTP session."""
 
