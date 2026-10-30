@@ -26,10 +26,10 @@ from io import BytesIO
 import FreeCAD
 import requests
 
-import freecad_plm_pb2 as PlmBuf
+from parts_manager_plm import freecad_plm_pb2 as PlmBuf
 
-from Login import get_connection
-from WorkspaceInventory import save_workspace_inventory
+from parts_manager_plm.Login import get_connection
+from parts_manager_plm.WorkspaceInventory import save_workspace_inventory
 
 class PlmUploadError(Exception):
     """Raised when a PLM upload fails."""
@@ -796,7 +796,7 @@ class PlmUploader:
 
         import os
         from PySide import QtCore
-        from WorkspaceInventory import (
+        from parts_manager_plm.WorkspaceInventory import (
             save_workspace_inventory,
             get_workspace_inventory
         )
@@ -1144,7 +1144,7 @@ def upload_documents(
     Convenience function for use by other FreeCAD modules.
 
     Example:
-        from plmupload import upload_documents
+        from parts_manager_plm.plmupload import upload_documents
         upload_documents([FreeCAD.ActiveDocument])
     """
 

@@ -11,7 +11,7 @@ import tempfile
 import shutil
 import json
 import FreeCAD
-from WorkspaceInventory import (
+from parts_manager_plm.WorkspaceInventory import (
     save_workspace_part,
     save_workspace_inventory,
 )

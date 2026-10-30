@@ -15,10 +15,10 @@ import os
 import shutil
 import FreeCAD
 import FreeCADGui
-import Login
-import WorkspaceInventory
-import PlmDownload
-import PlmTags
+from parts_manager_plm import Login
+from parts_manager_plm import WorkspaceInventory
+from parts_manager_plm import PlmDownload
+from parts_manager_plm import PlmTags
 
 from PySide import QtGui
 from PySide import QtCore, QtGui, QtWidgets
@@ -26,9 +26,7 @@ from PySide import QtCore, QtGui, QtWidgets
 WORKSPACE_INVENTORY_ENDPOINT = "/plmJson/workspaceParts"
 
 ICON_DIR = os.path.join(
-    FreeCAD.getUserAppDataDir(),
-    "Mod",
-    "part-manager-plm_for_freecad",
+    os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
     "icons"
 )
 
@@ -250,8 +248,7 @@ class WorkspacePanel:
         - Returns selected tag IDs.
         """
 
-        import PlmTags
-        tags = PlmTags.get_tags(self.connection)
+        from parts_manager_plm import PlmTags
         if selected_tags is None:
             selected_tags = []
 
@@ -839,7 +836,7 @@ class WorkspacePanel:
 
     def check_out_parts(self):
         """Check out selected server parts using the current PLM login."""
-        import plmupload
+        from parts_manager_plm import plmupload
 
         self.connection = Login.get_connection()
         if not self.connection or not self.connection.connected:
@@ -936,6 +933,55 @@ class WorkspacePanel:
     # Check selected workspace parts into PLM
     # ---------------------------------------------------------
 
+    def _existing_checkin_tag_ids(self, documents):
+        """Return tags shared by existing PLM parts being checked in.
+
+        New parts have no existing tags and do not affect the intersection.
+        An inventory failure is raised instead of silently clearing tags.
+        """
+        relative_paths = []
+        for doc in documents:
+            filename = getattr(doc, "FileName", "")
+            if filename:
+                relative_paths.append(os.path.relpath(
+                    filename, self.current_workspace
+                ).replace("\\", "/"))
+
+        if not relative_paths:
+            return []
+
+        inventory = self.get_server_inventory(relative_paths)
+        available = PlmTags.get_tags(self.connection)
+        name_to_id = {
+            str(tag.get("name", "")).strip(): int(tag["id"])
+            for tag in available
+            if isinstance(tag, dict) and tag.get("id") is not None
+        }
+        existing_sets = []
+        for path in relative_paths:
+            key = path.lower()
+            part = inventory.get(key) or inventory.get(os.path.basename(key))
+            if not part or not part.get("exists"):
+                continue
+            raw_tags = part.get("tags", []) or []
+            if isinstance(raw_tags, str):
+                raw_tags = [name.strip() for name in raw_tags.split(",")]
+            ids = set()
+            for tag in raw_tags:
+                if isinstance(tag, dict):
+                    tag_id = tag.get("id")
+                    if tag_id is not None:
+                        ids.add(int(tag_id))
+                        continue
+                    name = str(tag.get("name", "")).strip()
+                else:
+                    name = str(tag).strip()
+                if name in name_to_id:
+                    ids.add(name_to_id[name])
+            existing_sets.append(ids)
+
+        return sorted(set.intersection(*existing_sets)) if existing_sets else []
+
     def check_in_to_plm(self):
         """
         Upload selected workspace parts using plmupload.py.
@@ -949,7 +995,7 @@ class WorkspacePanel:
         - Refreshes workspace inventory after upload.
         """
 
-        import plmupload
+        from parts_manager_plm import plmupload
 
         # Verify PLM connection.
         self.connection = Login.get_connection()
@@ -1199,7 +1245,12 @@ class WorkspacePanel:
             FreeCAD.Console.PrintMessage(
                 "PLM: Starting workspace check-in.\n"
             )
-            tag_ids = self.select_plm_tags()
+            # Preselect tags already assigned to the parts on the server.
+            # For multiple existing parts, select only their common tags.
+            selected_tag_ids = self._existing_checkin_tag_ids(documents)
+            tag_ids = self.select_plm_tags(
+                selected_tags=selected_tag_ids
+            )
 
             if tag_ids is None:
                 return

@@ -11,14 +11,12 @@ import FreeCAD
 import FreeCADGui
 from PySide import QtCore, QtGui
 
-import Login as login
-import plmupload
+from parts_manager_plm import Login as login
+from parts_manager_plm import plmupload
 
 
 ICON_DIR = os.path.join(
-    FreeCAD.getUserAppDataDir(),
-    "Mod",
-    "part-manager-plm_for_freecad",
+    os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
     "icons"
 )
 

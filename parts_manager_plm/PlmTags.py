@@ -6,7 +6,7 @@ Parts Manager PLM - Tag management.
 
 import requests
 
-import Login
+from parts_manager_plm import Login
 
 
 TAGS_ENDPOINT = "/plmJson/tags"

@@ -14,20 +14,14 @@ import FreeCADGui
 
 from PySide import QtCore, QtWidgets
 
-import Login
-import PlmDownload
+from parts_manager_plm import Login
+from parts_manager_plm import PlmDownload
 
 ICON_DIR = os.path.join(
-    FreeCAD.getUserAppDataDir(),
-    "Mod",
-    "part-manager-plm_for_freecad",
+    os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
     "icons"
 )
 
-MODULE_DIR = os.path.dirname(os.path.abspath(__file__))
-
-if MODULE_DIR not in sys.path:
-    sys.path.insert(0, MODULE_DIR)
 
 class BrowseByTagPanel:
 
