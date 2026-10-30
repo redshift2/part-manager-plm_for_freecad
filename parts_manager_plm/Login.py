@@ -37,6 +37,7 @@ class PlmConnection:
         self.url = self.settings.value("url", "")
         self.passwd = ""
         self.server_info = None
+        
 
     def save_preferences(self):
         self.user = str(self.user).strip()
@@ -259,25 +260,34 @@ class LoginPanel:
         self.clear_server_info()
 
     def update_connection_status(self):
+        """Synchronize all login indicators with connection state."""
+
         connected = bool(self.connection.connected)
-        self.form.connectButton.setEnabled(not connected and not self._login_pending)
-        self.form.disconnectButton.setEnabled(connected and not self._login_pending)
+
+        self.form.connectButton.setEnabled(not connected)
+        self.form.disconnectButton.setEnabled(connected)
+
         if connected:
             self.form.connectButton.setText("Connected")
-            color = "#70c878"
-        elif self._login_pending:
-            self.form.connectButton.setText("Connecting...")
-            color = "#d7b54a"
-        elif self._login_failed:
-            self.form.connectButton.setText("Connect")
-            color = "#c95757"
+            self.form.connectButton.setStyleSheet(
+                "QPushButton {"
+                "background-color: #70c878;"
+                "color: white;"
+                "}"
+            )
+
+            self.form.loginMessageLabel.setText("Connected")
+
         else:
             self.form.connectButton.setText("Connect")
-            color = None
-        self.form.connectButton.setStyleSheet(
-            "QPushButton { background-color: %s; color: #ffffff; }" % color
-            if color else ""
-        )
+            self.form.connectButton.setStyleSheet(
+                "QPushButton {"
+                "background-color: #555555;"
+                "color: white;"
+                "}"
+            )
+
+            self.form.loginMessageLabel.setText("Not connected")
 
     def close_after_login(self):
         global _dialog
