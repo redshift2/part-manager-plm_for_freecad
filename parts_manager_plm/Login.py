@@ -128,7 +128,57 @@ class PlmConnection:
                 "Could not retrieve PLM server information: {}\n".format(exc)
             )
             return None
+    def check_connection(self, timeout=5):
+        """
+        Verify that the current HTTP session is authenticated.
 
+        Do not use the saved username or a previous connected flag
+        as proof of an active connection.
+        """
+        self.connected = False
+
+        if not self.url or self.session is None:
+            self.server_info = {}
+            return False
+
+        try:
+            url = self.url.rstrip("/") + "/plmJson/serverInfo"
+
+            response = self.session.get(
+                url,
+                timeout=timeout,
+                allow_redirects=False
+            )
+
+            if response.status_code != 200:
+                self.server_info = {}
+                return False
+
+            info = response.json()
+
+            if not isinstance(info, dict):
+                self.server_info = {}
+                return False
+
+            # Validate that this is a PLM server response.
+            if not any(
+                key in info
+                for key in (
+                    "features",
+                    "maximumFileUploadSize",
+                    "maxRequestSize"
+                )
+            ):
+                self.server_info = {}
+                return False
+
+            self.server_info = info
+            self.connected = True
+            return True
+
+        except (requests.RequestException, ValueError):
+            self.server_info = {}
+            return False
 
 connection = PlmConnection()
 
@@ -156,7 +206,10 @@ class LoginPanel:
         self.form.connectButton.clicked.connect(self.login)
         self.form.disconnectButton.clicked.connect(self.logout)
         self.form.passEdit.returnPressed.connect(self.login)
-        self.update_connection_status()
+        self.refresh_connection_status()
+        self.connection_timer = QtCore.QTimer(self.form)
+        self.connection_timer.timeout.connect(self.refresh_connection_status)
+        self.connection_timer.start(30000)
         if self.connection.connected:
             self.display_server_info(self.connection.server_info)
         else:
@@ -259,6 +312,17 @@ class LoginPanel:
         self.form.loginMessageLabel.setText("Disconnected.")
         self.update_connection_status()
         self.clear_server_info()
+
+    def refresh_connection_status(self):
+        """Verify the session and synchronize the login controls."""
+        if self._login_pending:
+            return
+        self.connection.check_connection()
+        self.update_connection_status()
+        if self.connection.connected:
+            self.display_server_info(self.connection.server_info)
+        else:
+            self.clear_server_info()
 
     def update_connection_status(self):
         """Synchronize all login indicators with connection state."""
@@ -379,7 +443,6 @@ def show_login_dialog():
     _dialog.raise_()
     _dialog.activateWindow()
     QtCore.QTimer.singleShot(0, _login_panel.form.passEdit.setFocus)
-
 
 def _on_dialog_finished(result):
     global _dialog, _login_panel
