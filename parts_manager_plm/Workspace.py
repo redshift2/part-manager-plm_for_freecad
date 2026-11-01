@@ -53,6 +53,7 @@ class WorkspacePanel:
         self.dialog.resize(1100, 520)
 
         self.build_ui()
+        self.configure_global_workspace()
         self.load_workspaces()
         self.refresh_parts()
 
@@ -61,7 +62,12 @@ class WorkspacePanel:
     # ---------------------------------------------------------
 
     def build_ui(self):
-        layout = QtWidgets.QVBoxLayout(self.dialog)
+        root_layout = QtWidgets.QVBoxLayout(self.dialog)
+        self.workspace_tabs = QtWidgets.QTabWidget()
+        root_layout.addWidget(self.workspace_tabs)
+        local_page = QtWidgets.QWidget()
+        self.workspace_tabs.addTab(local_page, "Local Workspaces")
+        layout = QtWidgets.QVBoxLayout(local_page)
 
         # Workspace selection
         workspace_layout = QtWidgets.QHBoxLayout()
@@ -231,6 +237,47 @@ class WorkspacePanel:
         close_button = QtWidgets.QPushButton("Close")
         close_button.clicked.connect(self.dialog.close)
         layout.addWidget(close_button)
+
+    def configure_global_workspace(self):
+        """Show Global Workspaces only if the server advertises the feature."""
+        self.connection = Login.get_connection()
+        if not self.connection or not getattr(self.connection, 'connected', False):
+            self._remove_global_workspace_tab()
+            return
+        try:
+            from urllib.parse import urljoin
+            base = str(getattr(self.connection, 'url', '') or '').strip()
+            if not base:
+                self._remove_global_workspace_tab()
+                return
+            url = urljoin(base.rstrip('/') + '/', 'plmJson/serverInfo')
+            response = self.connection.session.get(url, timeout=12)
+            response.raise_for_status()
+            payload = response.json()
+            features = payload.get('features', []) if isinstance(payload, dict) else []
+            enabled = isinstance(features, list) and 'globalWorkspace' in features
+            if not enabled:
+                self._remove_global_workspace_tab()
+                return
+            if getattr(self, 'global_workspace_page', None) is None:
+                from parts_manager_plm.GlobalWorkspace import GlobalWorkspacePanel
+                self.global_workspace_page = GlobalWorkspacePanel(self.connection)
+                self.workspace_tabs.addTab(self.global_workspace_page, 'Global Workspaces')
+            else:
+                self.global_workspace_page.connection = self.connection
+        except Exception as exc:
+            self._remove_global_workspace_tab()
+            FreeCAD.Console.PrintWarning(
+                'PLM: Could not detect global workspaces: {}\n'.format(exc))
+
+    def _remove_global_workspace_tab(self):
+        page = getattr(self, 'global_workspace_page', None)
+        if page is not None:
+            index = self.workspace_tabs.indexOf(page)
+            if index >= 0:
+                self.workspace_tabs.removeTab(index)
+            page.deleteLater()
+            self.global_workspace_page = None
 
     # ---------------------------------------------------------
     # Select PLM tags using hierarchical tree
@@ -3171,6 +3218,7 @@ class WorkspacePanel:
         )
 
     def show(self):
+        self.configure_global_workspace()
         self.dialog.show()
         self.dialog.raise_()
         self.dialog.activateWindow()
