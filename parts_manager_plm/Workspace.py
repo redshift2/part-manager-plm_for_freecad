@@ -264,7 +264,7 @@ class WorkspacePanel:
                 self.global_workspace_page = GlobalWorkspacePanel(self.connection)
                 self.workspace_tabs.addTab(self.global_workspace_page, 'Global Workspaces')
             else:
-                self.global_workspace_page.connection = self.connection
+                self.global_workspace_page.set_connection(self.connection)
         except Exception as exc:
             self._remove_global_workspace_tab()
             FreeCAD.Console.PrintWarning(
