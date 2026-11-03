@@ -5,6 +5,7 @@ The optional global workspace API is separate from local Workspace.py.
 """
 from urllib.parse import urljoin
 import os
+import hashlib
 import re
 from parts_manager_plm import PlmDownload
 from parts_manager_plm import WorkspaceInventory
@@ -44,8 +45,8 @@ class GlobalWorkspacePanel(QtWidgets.QWidget):
             button.setText({'import.svg': '+', 'sync.svg': 'Sync',
                             'remove.svg': '-', 'open.svg': 'Open',
                             'checkout.svg': 'Out', 'checkin.svg': 'In',
-                            'tags.svg': 'Tags', 'approve.svg': 'OK',
-                             'share.svg': 'Share', 'browser.svg': 'Web'}.get(filename, '?'))
+                            'tags.svg': 'Tags', 'approve.svg': 'Approve',
+                            'share.svg': 'Share', 'browser.svg': 'Browser'}.get(filename, '?'))
         button.setIconSize(QtCore.QSize(28, 28))
         button.setFixedSize(42, 42)
         button.setToolTip(tooltip)
@@ -61,7 +62,7 @@ class GlobalWorkspacePanel(QtWidgets.QWidget):
         self.workspace_combo.setMinimumWidth(230)
         self.workspace_combo.currentIndexChanged.connect(self.refresh_inventory)
         top.addWidget(self.workspace_combo, 1)
-        self._button('Refresh', self.refresh_workspaces, top)
+        self._button('Refresh', lambda _checked=False: self.refresh_workspaces(), top)
         self._button('Create', self.create_workspace, top)
         self.duplicate_button = self._button('Duplicate', self.duplicate_workspace, top)
         self.delete_button = self._button('Delete', self.delete_workspace, top)
@@ -71,16 +72,17 @@ class GlobalWorkspacePanel(QtWidgets.QWidget):
         self.details.setWordWrap(True)
         layout.addWidget(self.details)
         self.parts_table = QtWidgets.QTableWidget()
-        self.parts_table.setColumnCount(5)
+        self.parts_table.setColumnCount(7)
         self.parts_table.setHorizontalHeaderLabels([
-            'Part', 'Workspace Version', 'Latest CAD Version', 'Update Available', 'Local Status'])
+            'Part', 'Workspace Version', 'Latest CAD Version', 'Update Available',
+            'Lifecycle State', 'Local Status', 'Modified'])
         self.parts_table.setSelectionBehavior(QtWidgets.QAbstractItemView.SelectRows)
         self.parts_table.setSelectionMode(QtWidgets.QAbstractItemView.ExtendedSelection)
         self.parts_table.setEditTriggers(QtWidgets.QAbstractItemView.NoEditTriggers)
         self.parts_table.setAlternatingRowColors(True)
         header = self.parts_table.horizontalHeader()
         header.setSectionResizeMode(0, QtWidgets.QHeaderView.Stretch)
-        for column in range(1, 5):
+        for column in range(1, 7):
             header.setSectionResizeMode(column, QtWidgets.QHeaderView.ResizeToContents)
         layout.addWidget(self.parts_table, 1)
 
@@ -148,6 +150,9 @@ class GlobalWorkspacePanel(QtWidgets.QWidget):
         self.refresh_workspaces()
 
     def refresh_workspaces(self, preferred_id=None):
+        # QPushButton.clicked can pass a boolean; it is not a workspace ID.
+        if isinstance(preferred_id, bool):
+            preferred_id = None
         try:
             previous_id = preferred_id if preferred_id is not None else self._workspace_id()
             self.workspaces = self.api.list_workspaces()
@@ -156,7 +161,14 @@ class GlobalWorkspacePanel(QtWidgets.QWidget):
             for w in self.workspaces:
                 if isinstance(w, dict) and w.get('id') is not None:
                     self.workspace_combo.addItem(str(w.get('name') or 'Unnamed Workspace'), w['id'])
-            index = self.workspace_combo.findData(previous_id)
+            # Compare IDs as strings: the API and Qt may return different types.
+            # A Qt clicked(bool) argument must never be treated as a workspace ID.
+            index = -1
+            if previous_id is not None:
+                for i in range(self.workspace_combo.count()):
+                    if str(self.workspace_combo.itemData(i)) == str(previous_id):
+                        index = i
+                        break
             if index >= 0:
                 self.workspace_combo.setCurrentIndex(index)
             self.workspace_combo.blockSignals(False)
@@ -184,22 +196,31 @@ class GlobalWorkspacePanel(QtWidgets.QWidget):
             self.current_inventory = payload['inventory']
             w = self.current_workspace
             inv = self.current_inventory
-            self.details.setText('Owner: {}    Access: {}    Inventory revision: {}\n{}'.format(
+            local_folder = self._sync_directory() or 'Not configured'
+            self.details.setText('Owner: {}    Access: {}    Inventory revision: {}    Local workspace folder: {}\n{}'.format(
                 w.get('owner', ''), w.get('role', ''), inv.get('inventoryRevision', ''),
-                w.get('description', '') or ''))
+                local_folder, w.get('description', '') or ''))
             parts = inv.get('parts', {})
             entries = sorted((p for p in parts.values() if isinstance(p, dict)),
                              key=lambda p: str(p.get('name', '')).lower())
+            lifecycle_by_id = self._fetch_lifecycle_states(entries)
             self.parts_table.setRowCount(len(entries))
             for row, part in enumerate(entries):
                 values = [part.get('name') or part.get('file') or '',
                           part.get('version', ''), part.get('latestVersion', ''),
                           'Yes' if part.get('updateAvailable') else 'No',
-                          self._local_status(part)]
+                          part.get('lifecycleState') or part.get('lifecycle') or lifecycle_by_id.get(str(part.get('partId')), 'Unknown'),
+                          self._local_status(part), self._locally_modified(part)]
                 for column, value in enumerate(values):
                     item = QtWidgets.QTableWidgetItem('' if value is None else str(value))
                     if column == 0:
                         item.setData(QtCore.Qt.UserRole, part.get('partId'))
+                    elif column == 4:  # Match Local Workspace lifecycle colors.
+                        state = str(value or '').strip().upper()
+                        if state == 'CHECKED_OUT':
+                            item.setForeground(QtGui.QBrush(QtGui.QColor(0, 110, 180)))
+                        elif state == 'RELEASED':
+                            item.setForeground(QtGui.QBrush(QtGui.QColor(0, 125, 55)))
                     self.parts_table.setItem(row, column, item)
             self.status.setText('{} part(s) in global workspace.'.format(len(entries)))
         except Exception as exc:
@@ -207,6 +228,50 @@ class GlobalWorkspacePanel(QtWidgets.QWidget):
             self.status.setText(str(exc))
         finally:
             self._update_permissions()
+
+    def _fetch_lifecycle_states(self, entries):
+        """Retrieve current PLM lifecycle states in one authenticated batch request.
+
+        Global Workspace inventory records may omit lifecycleState. The existing
+        /plmJson/workspaceParts endpoint returns it for matching current parts.
+        """
+        missing = [p for p in entries if not (p.get('lifecycleState') or p.get('lifecycle'))]
+        if not missing:
+            return {}
+        request_parts = []
+        for part in missing:
+            filename = self._download_filename(part)
+            if filename:
+                request_parts.append({'name': filename, 'relativePath': filename})
+        if not request_parts:
+            return {}
+        try:
+            url = urljoin(str(self.connection.url).rstrip('/') + '/', 'plmJson/workspaceParts')
+            response = self.connection.session.post(
+                url, json={'parts': request_parts},
+                headers={'Accept': 'application/json'}, timeout=30)
+            response.raise_for_status()
+            payload = response.json()
+            if not isinstance(payload, dict) or not isinstance(payload.get('parts'), list):
+                raise ValueError('Unexpected workspaceParts response')
+            by_name = {}
+            for record in payload['parts']:
+                if isinstance(record, dict) and record.get('existsInPlm'):
+                    name = str(record.get('name') or '').casefold()
+                    by_name[name] = record
+            states = {}
+            for part in missing:
+                filename = self._download_filename(part)
+                record = by_name.get(filename.casefold()) if filename else None
+                if record and str(record.get('plmPartId')) == str(part.get('partId')):
+                    state = record.get('lifecycleState')
+                    if state and state != 'NOT_IN_PLM':
+                        states[str(part.get('partId'))] = state
+            return states
+        except Exception as exc:
+            FreeCAD.Console.PrintWarning(
+                'PLM: Could not retrieve Global Workspace lifecycle states: {}\n'.format(exc))
+            return {}
 
     def _local_status(self, part):
         """Compare the downloaded file and its local workspace.json with server CAD version."""
@@ -225,6 +290,51 @@ class GlobalWorkspacePanel(QtWidgets.QWidget):
         if str(local_version) == str(latest_version):
             return 'Up to date'
         return 'Outdated (local {})'.format(local_version)
+
+    def _file_fingerprint(self, path):
+        """Hash the saved CAD file to detect edits made outside FreeCAD too."""
+        digest = hashlib.sha256()
+        with open(path, 'rb') as source:
+            for chunk in iter(lambda: source.read(1024 * 1024), b''):
+                digest.update(chunk)
+        return digest.hexdigest()
+
+    def _baseline_key(self, part_id):
+        return 'globalWorkspaceFileHash/{}/{}'.format(self._workspace_id(), part_id)
+
+    def _remember_download(self, part_id, path):
+        """Record the exact file received from PLM as the unmodified baseline."""
+        try:
+            if path and os.path.isfile(path):
+                settings = QtCore.QSettings('PMPLM', 'PartsManager')
+                settings.setValue(self._baseline_key(part_id), self._file_fingerprint(path))
+                settings.sync()
+        except (OSError, IOError) as exc:
+            FreeCAD.Console.PrintWarning('PLM: Could not record local file baseline: {}\n'.format(exc))
+
+    def _locally_modified(self, part):
+        """Report unsaved FreeCAD changes and changes to downloaded file bytes."""
+        directory = self._sync_directory()
+        if not directory:
+            return 'Not configured'
+        part_id = part.get('partId')
+        path = self._local_path(part_id)
+        if not path or not os.path.isfile(path):
+            return 'Not downloaded'
+        normalized = os.path.normcase(os.path.realpath(path))
+        for doc in FreeCAD.listDocuments().values():
+            filename = getattr(doc, 'FileName', '')
+            if filename and os.path.normcase(os.path.realpath(filename)) == normalized:
+                if getattr(doc, 'Modified', False):
+                    return 'Yes (unsaved)'
+        settings = QtCore.QSettings('PMPLM', 'PartsManager')
+        baseline = str(settings.value(self._baseline_key(part_id), '') or '')
+        if not baseline:
+            return 'Unknown (sync to establish baseline)'
+        try:
+            return 'No' if self._file_fingerprint(path) == baseline else 'Yes'
+        except (OSError, IOError):
+            return 'Unknown (file unreadable)'
 
     def create_workspace(self):
         name, ok = QtWidgets.QInputDialog.getText(self, 'Create Global Workspace', 'Workspace name:')
@@ -490,6 +600,7 @@ class GlobalWorkspacePanel(QtWidgets.QWidget):
                         destination_path=target)
                     if result and os.path.isfile(result):
                         self._synced_part_paths[str(part['partId'])] = os.path.realpath(result)
+                        self._remember_download(part['partId'], result)
                         downloaded += 1
                         if os.path.basename(result) != name:
                             FreeCAD.Console.PrintMessage(
@@ -597,6 +708,7 @@ class GlobalWorkspacePanel(QtWidgets.QWidget):
             self._error('Check out', '\n'.join(errors))
 
     def checkin_parts(self):
+        """Check in selected parts; approve only after a confirmed successful upload."""
         selected = self._selected_parts()
         if not selected:
             self._error('Check in', 'Select one or more parts first.')
@@ -606,12 +718,98 @@ class GlobalWorkspacePanel(QtWidgets.QWidget):
         if missing:
             self._error('Check in', 'Sync these parts to the computer first:\n' + '\n'.join(missing))
             return
-        # Use the existing PLM check-in dialog, which handles linked documents,
-        # lifecycle permissions, tags and upload processing.
         self.open_parts()
         from parts_manager_plm import plmcheckin
-        plmcheckin.show_checkin_dialog()
-        self.refresh_inventory()
+        dialog = plmcheckin.show_checkin_dialog()
+        if dialog is None:
+            return
+        workspace_id = self._workspace_id()
+        selected_paths = {
+            str(pid): os.path.normcase(os.path.realpath(self._local_path(pid)))
+            for _, pid in selected
+        }
+
+        upload_succeeded = {'value': False, 'paths': set()}
+        original_refresh = dialog.refresh
+
+        def capture_success_refresh(*args, **kwargs):
+            if dialog.status_label.text() == 'Check-in completed successfully.':
+                upload_succeeded['value'] = True
+                upload_succeeded['paths'] = {
+                    os.path.normcase(os.path.realpath(getattr(doc, 'FileName', '') or ''))
+                    for doc in dialog.included_documents()
+                }
+            return original_refresh(*args, **kwargs)
+
+        dialog.refresh = capture_success_refresh
+
+        def approve_after_success():
+            # Only the files included in a successful check-in are eligible.
+            if not upload_succeeded['value']:
+                return
+            upload_succeeded['value'] = False
+            uploaded_paths = upload_succeeded['paths']
+            approved, updated, failures = [], [], []
+            directory = self._sync_directory()
+            for name, part_id in selected:
+                local_path = selected_paths[str(part_id)]
+                if local_path not in uploaded_paths:
+                    continue
+                try:
+                    # Get a fresh inventory revision before each approval.
+                    inventory = self.api.inventory(workspace_id)['inventory']
+                    revision = int(inventory['inventoryRevision'])
+                    self.api.approve_version(workspace_id, part_id, revision)
+                    approved.append(name)
+                except Exception as exc:
+                    failures.append('{}: approval failed: {}'.format(name, exc))
+                    continue
+
+                # The checked-in file is already the new server revision.
+                # Update its local CAD version metadata rather than downloading
+                # it again (which could overwrite the user's working document).
+                try:
+                    fresh_inventory = self.api.inventory(workspace_id)['inventory']
+                    records = fresh_inventory.get('parts', {})
+                    fresh_part = next(
+                        (p for p in records.values()
+                         if isinstance(p, dict) and str(p.get('partId')) == str(part_id)),
+                        None)
+                    if fresh_part is None:
+                        raise ValueError('Approved part missing from refreshed inventory')
+                    approved_version = fresh_part.get('version')
+                    if not approved_version:
+                        raise ValueError('Approved CAD version missing from inventory')
+                    path = self._local_path(part_id)
+                    if not directory or not path or not os.path.isfile(path):
+                        raise ValueError('Local file not found after check-in')
+                    WorkspaceInventory.save_workspace_part(
+                        directory, part_id,
+                        {'originalName': os.path.basename(path),
+                         'version': approved_version,
+                         'cadVersion': approved_version},
+                        path)
+                    self._synced_part_paths[str(part_id)] = os.path.realpath(path)
+                    self._remember_download(part_id, path)
+                    updated.append(name)
+                except Exception as exc:
+                    failures.append('{}: approved, but local version metadata could not be updated: {}'.format(
+                        name, exc))
+            if self._workspace_id() == workspace_id:
+                self.refresh_inventory()
+            summary = ('Check-in succeeded. Approved {} uploaded part(s); '
+                       'updated {} local version record(s).').format(len(approved), len(updated))
+            if failures:
+                summary += '\n' + '\n'.join(failures)
+                self._error('Global Workspace approval', summary)
+            else:
+                self.status.setText(summary)
+
+        # Do not approve when the dialog is opened, canceled, or upload fails.
+        # The dialog's existing click handler performs the actual upload.
+        def on_checkin_clicked():
+            QtCore.QTimer.singleShot(0, approve_after_success)
+        dialog.checkin_button.clicked.connect(on_checkin_clicked)
 
     def edit_tags(self):
         selected = self._selected_parts()
@@ -790,6 +988,7 @@ class GlobalWorkspacePanel(QtWidgets.QWidget):
                     if not result_path or not os.path.isfile(result_path):
                         raise RuntimeError('Download failed; server approval succeeded')
                     self._synced_part_paths[str(part_id)] = os.path.realpath(result_path)
+                    self._remember_download(part_id, result_path)
                     updated.append(name)
                 except Exception as exc:
                     failures.append('{}: approved on server, but local update failed: {}'.format(

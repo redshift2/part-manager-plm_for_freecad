@@ -23,6 +23,8 @@ KNOWN_SERVER_FEATURES = {
     "releasePart": "Release Part",
     "createRevision": "Create Revision",
     "partHistory": "Part History",
+    "globalWorkspace": "Global Workspace",
+
 }
 
 
