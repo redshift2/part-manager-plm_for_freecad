@@ -20,7 +20,7 @@ class PMPLMWorkbench(Workbench):
             "part-manager-plm_for_freecad"
         )
 
-        self.icon_dir = os.path.join(self.module_dir, "icons")
+        self.icon_dir = os.path.join(self.module_dir, "freecad", "parts_manager_plm", "resources", "icons")
 
         self.__class__.Icon = os.path.join(self.icon_dir, "icon.png")
 
@@ -32,29 +32,13 @@ class PMPLMWorkbench(Workbench):
         import sys
         import importlib.util
 
-        # Load our private package directly, without changing sys.path.
-        # This avoids collisions with Taack's top-level module names.
-        package_name = "parts_manager_plm"
-        package_dir = os.path.join(self.module_dir, package_name)
-        package_init = os.path.join(package_dir, "__init__.py")
-        if package_name not in sys.modules:
-            spec = importlib.util.spec_from_file_location(
-                package_name,
-                package_init,
-                submodule_search_locations=[package_dir],
-            )
-            if spec is None or spec.loader is None:
-                raise ImportError("Cannot load Parts Manager PLM package: " + package_init)
-            package = importlib.util.module_from_spec(spec)
-            sys.modules[package_name] = package
-            try:
-                spec.loader.exec_module(package)
-            except Exception:
-                sys.modules.pop(package_name, None)
-                raise
+        # Import through FreeCAD's standard namespaced addon layout.
+        # The addon root is on FreeCAD's module search path.
+        # No top-level module names are introduced.
+        from freecad import parts_manager_plm
 
         # Import the command modules.
-        from parts_manager_plm import Login, BrowseSearch, Workspace, SearchParts, plmcheckin
+        from freecad.parts_manager_plm import Login, BrowseSearch, Workspace, SearchParts, plmcheckin
 
         # Register the Check-In command.
         plmcheckin.register_command()

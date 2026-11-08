@@ -1,0 +1,13 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "freecad-parts-manager-plm"
+version = "2.1.0"
+description = "Parts Manager PLM FreeCAD workbench"
+requires-python = ">=3.10"
+dependencies = ["protobuf", "requests"]
+
+[tool.hatch.build.targets.wheel]
+packages = ["freecad"]

@@ -15,10 +15,10 @@ import os
 import shutil
 import FreeCAD
 import FreeCADGui
-from parts_manager_plm import Login
-from parts_manager_plm import WorkspaceInventory
-from parts_manager_plm import PlmDownload
-from parts_manager_plm import PlmTags
+from freecad.parts_manager_plm import Login
+from freecad.parts_manager_plm import WorkspaceInventory
+from freecad.parts_manager_plm import PlmDownload
+from freecad.parts_manager_plm import PlmTags
 
 from PySide import QtGui
 from PySide import QtCore, QtGui, QtWidgets
@@ -26,8 +26,8 @@ from PySide import QtCore, QtGui, QtWidgets
 WORKSPACE_INVENTORY_ENDPOINT = "/plmJson/workspaceParts"
 
 ICON_DIR = os.path.join(
-    os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
-    "icons"
+    os.path.dirname(os.path.abspath(__file__)),
+    "resources", "icons"
 )
 
 
@@ -260,7 +260,7 @@ class WorkspacePanel:
                 self._remove_global_workspace_tab()
                 return
             if getattr(self, 'global_workspace_page', None) is None:
-                from parts_manager_plm.GlobalWorkspace import GlobalWorkspacePanel
+                from freecad.parts_manager_plm.GlobalWorkspace import GlobalWorkspacePanel
                 self.global_workspace_page = GlobalWorkspacePanel(self.connection)
                 self.workspace_tabs.addTab(self.global_workspace_page, 'Global Workspaces')
             else:
@@ -295,7 +295,7 @@ class WorkspacePanel:
         - Returns selected tag IDs.
         """
 
-        from parts_manager_plm import PlmTags
+        from freecad.parts_manager_plm import PlmTags
         if selected_tags is None:
             selected_tags = []
 
@@ -883,7 +883,7 @@ class WorkspacePanel:
 
     def check_out_parts(self):
         """Check out selected server parts using the current PLM login."""
-        from parts_manager_plm import plmupload
+        from freecad.parts_manager_plm import plmupload
 
         self.connection = Login.get_connection()
         if not self.connection or not self.connection.connected:
@@ -1042,7 +1042,7 @@ class WorkspacePanel:
         - Refreshes workspace inventory after upload.
         """
 
-        from parts_manager_plm import plmupload
+        from freecad.parts_manager_plm import plmupload
 
         # Verify PLM connection.
         self.connection = Login.get_connection()

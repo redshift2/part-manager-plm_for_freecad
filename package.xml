@@ -16,7 +16,7 @@
   <url branch="main" type="repository">https://github.com/redshift2/part-manager-plm_for_freecad</url>
   <url type="readme">https://github.com/redshift2/part-manager-plm_for_freecad/blob/main/README.md</url>
 
-  <icon>icons/icon.png</icon>
+  <icon>freecad/parts_manager_plm/resources/icons/icon.png</icon>
 
   <content>
     <workbench>

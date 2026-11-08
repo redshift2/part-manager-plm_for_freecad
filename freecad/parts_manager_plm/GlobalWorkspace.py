@@ -7,15 +7,15 @@ from urllib.parse import urljoin
 import os
 import hashlib
 import re
-from parts_manager_plm import PlmDownload
-from parts_manager_plm import WorkspaceInventory
-from parts_manager_plm import PlmTags
+from freecad.parts_manager_plm import PlmDownload
+from freecad.parts_manager_plm import WorkspaceInventory
+from freecad.parts_manager_plm import PlmTags
 import FreeCAD
 import FreeCADGui
 from PySide import QtCore, QtGui, QtWidgets
-from parts_manager_plm.GlobalWorkspaceApi import GlobalWorkspaceApi
+from freecad.parts_manager_plm.GlobalWorkspaceApi import GlobalWorkspaceApi
 
-ICON_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "icons")
+ICON_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "resources", "icons")
 
 
 class GlobalWorkspacePanel(QtWidgets.QWidget):
@@ -693,7 +693,7 @@ class GlobalWorkspacePanel(QtWidgets.QWidget):
                 QtWidgets.QMessageBox.Yes | QtWidgets.QMessageBox.No,
                 QtWidgets.QMessageBox.No) != QtWidgets.QMessageBox.Yes:
             return
-        from parts_manager_plm import plmupload
+        from freecad.parts_manager_plm import plmupload
         uploader = plmupload.PlmUploader(connection=self.connection)
         successes, errors = 0, []
         for name, part_id in selected:
@@ -719,7 +719,7 @@ class GlobalWorkspacePanel(QtWidgets.QWidget):
             self._error('Check in', 'Sync these parts to the computer first:\n' + '\n'.join(missing))
             return
         self.open_parts()
-        from parts_manager_plm import plmcheckin
+        from freecad.parts_manager_plm import plmcheckin
         dialog = plmcheckin.show_checkin_dialog()
         if dialog is None:
             return

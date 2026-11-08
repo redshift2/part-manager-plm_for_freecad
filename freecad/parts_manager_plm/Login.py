@@ -9,7 +9,7 @@ import FreeCADGui
 from PySide import QtCore, QtGui, QtWidgets
 
 ICON_DIR = os.path.join(
-    os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "icons"
+    os.path.dirname(os.path.abspath(__file__)), "resources", "icons"
 )
 
 KNOWN_SERVER_FEATURES = {
@@ -198,7 +198,7 @@ class LoginPanel:
         self.connection = plm_connection
         self._login_pending = False
         self._login_failed = False
-        ui_path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "Login.ui")
+        ui_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "resources", "ui", "Login.ui")
         self.form = FreeCADGui.PySideUic.loadUi(ui_path)
         self.form.userEdit.setText(self.connection.user or "")
         self.form.urlEdit.setText(self.connection.url or "")

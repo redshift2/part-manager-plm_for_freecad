@@ -14,12 +14,12 @@ import FreeCADGui
 
 from PySide import QtCore, QtWidgets
 
-from parts_manager_plm import Login
-from parts_manager_plm import PlmDownload
+from freecad.parts_manager_plm import Login
+from freecad.parts_manager_plm import PlmDownload
 
 ICON_DIR = os.path.join(
-    os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
-    "icons"
+    os.path.dirname(os.path.abspath(__file__)),
+    "resources", "icons"
 )
 
 

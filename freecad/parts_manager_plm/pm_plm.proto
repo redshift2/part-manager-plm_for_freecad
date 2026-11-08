@@ -1,0 +1,60 @@
+syntax = "proto2";
+package pmplm;
+
+// Wire-compatible with the PLM server schema. The package and file name are private
+// to avoid process-global descriptor collisions with Taack.
+
+enum ServerStatus {
+  OK_PROTO = 0;
+  NOK_PROTO = 1;
+  OK_FILES = 2;
+  NOK_FILES = 3;
+}
+
+message PlmFile {
+  optional string id = 1;
+  optional string name = 12;
+  optional string fileName = 2;
+  optional string label = 3;
+  optional string lastModifiedBy = 4;
+  optional string lastModifiedDate = 5;
+  optional string comment = 6;
+  optional string company = 7;
+  optional string createdBy = 8;
+  optional string createdDate = 9;
+  repeated string externalLink = 10;
+  optional bytes fileContent = 11;
+  optional int64 cTimeNs = 13;
+  optional int64 uTimeNs = 14;
+  optional string sha1hex = 15;
+  optional bytes filePreview = 16;
+}
+
+message PlmLink {
+  enum LinkCopyOnChangeEnum {
+    Disabled = 0;
+    Enabled = 1;
+    Owned = 2;
+  }
+  optional string linkedObject = 1;
+  optional bool linkClaimChild = 2;
+  optional bool linkTransform = 3;
+  optional PlmLink.LinkCopyOnChangeEnum linkCopyOnChange = 4;
+  optional double scale = 5;
+  optional string plmFile = 6;
+}
+
+message Bucket {
+  message PlmFilesEntry {
+    optional string key = 1;
+    optional PlmFile value = 2;
+  }
+  message LinksEntry {
+    optional string key = 1;
+    optional PlmLink value = 2;
+  }
+  repeated Bucket.PlmFilesEntry plmFiles = 1;
+  repeated Bucket.LinksEntry links = 2;
+  repeated string serverSha1Files = 3;
+  optional ServerStatus status = 4;
+}

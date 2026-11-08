@@ -11,13 +11,13 @@ import FreeCAD
 import FreeCADGui
 from PySide import QtCore, QtGui
 
-from parts_manager_plm import Login as login
-from parts_manager_plm import plmupload
+from freecad.parts_manager_plm import Login as login
+from freecad.parts_manager_plm import plmupload
 
 
 ICON_DIR = os.path.join(
-    os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
-    "icons"
+    os.path.dirname(os.path.abspath(__file__)),
+    "resources", "icons"
 )
 
 def _enum(owner, old_name, new_path):
